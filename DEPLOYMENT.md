@@ -14,7 +14,7 @@ Phone / browser ──HTTPS──► Vercel (Next.js pages + /api routes + game 
 ## 1. Local database (pgAdmin 4)
 
 1. In pgAdmin, open **Servers → PostgreSQL 17 → Databases → phase10**. It must be empty.
-2. **Tools → Query Tool**, then the **Open File** icon. Choose `db/phase10_postgres_import.sql`.
+2. **Tools → Query Tool** (not *Restore*: Restore only reads binary `pg_dump` files and fails with "input file does not appear to be a valid archive"), then the **Open File** icon. Choose `db/phase10_postgres_import.sql`.
 3. Press **Execute (F5)**. You should see `COMMIT` at the end. Some "already exists, skipping" notices are normal.
 4. Check it worked:
    ```sql
@@ -49,8 +49,9 @@ Other useful commands:
 
 1. Create a project at supabase.com. Pick the region closest to your players, and save the database password.
 2. **SQL Editor → New query**: paste the contents of `db/phase10_postgres_import.sql` (or `db/schema.sql` for an empty start) and **Run**.
-3. **Project Settings → Database → Connection string → Transaction pooler** (port **6543**). Copy the URI and put your password in it. This is your production `DATABASE_URL`.
-4. **Project Settings → API**: copy the **Project URL**, the **anon / publishable** key and the **service_role / secret** key.
+3. **Database URL:** open your project and click the **Connect** button at the top of the page, next to the project name. In the dialog, choose **Transaction pooler** (port **6543**, labelled for serverless). Copy the URI and replace `[YOUR-PASSWORD]` with your database password. This is your production `DATABASE_URL`.
+   *Older dashboards showed this under Project Settings → Database. Supabase has since moved it to **Connect**.*
+4. **Keys:** go to **Project Settings → API Keys**. Copy the **Project URL** (also shown under Project Settings → Data API), the **publishable** key (or the legacy **anon** key) and the **secret** key (or the legacy **service_role** key). Either the new keys or the legacy ones work.
 5. You don't need to enable anything for Realtime. The app uses *Broadcast* on public topics (`game-<id>`, `lobbies`), and those messages carry only a version number. Each player then fetches their own private view from the API.
 
 Security notes:
