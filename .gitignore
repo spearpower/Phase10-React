@@ -1,13 +1,41 @@
+# Dependencies and build output
 node_modules/
 .next/
 out/
+build/
 *.tsbuildinfo
 next-env.d.ts
+
+# Local environment and secrets (online values live in Vercel → Settings → Environment Variables)
 .env
 .env.*
 !.env.example
+*.local
 .vercel/
-# Postgres import generated from the old MySQL data (contains real player data)
-db/phase10_postgres_import.sql
+.supabase/
+supabase/.temp/
+
+# Database files: only the public schema is committed.
+# Imports, dumps and connection notes contain real player data or passwords.
+db/*
+!db/schema.sql
+*.sql.gz
+*.dump
+*.backup
+
+# Notes / credentials kept locally
+*.pem
+*.key
+connect*.txt
+secrets*.txt
+
+# Logs and test output
+*.log
+npm-debug.log*
+coverage/
+
+# OS / editor
 Thumbs.db
 .DS_Store
+.vscode/
+.idea/
