@@ -1,0 +1,31 @@
+{
+  "name": "sofi10-web",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Sofi10 — real-time phase card game (Next.js on Vercel + Postgres/Supabase)",
+  "scripts": {
+    "dev": "next dev -p 3010",
+    "build": "next build",
+    "start": "next start -p 3010",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0",
+    "jose": "6.2.17",
+    "next": "15.5.29",
+    "postgres": "3.4.9",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}
