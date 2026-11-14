@@ -7,6 +7,7 @@ import { conditionLabel, meetsCondition, placeInGroup, type Condition } from '@/
 import type { Action, GameView, PlayerView } from '@/lib/engine';
 import { initSound, playSound, playTurnSound, setSoundOn, soundOn } from '@/lib/sound';
 import { Bubbles, Confetti, Crown, type Bubble, type BubbleKind } from '@/components/Celebrate';
+import TableChat from '@/components/TableChat';
 
 // Pure helpers (no node 'crypto' import on the client)
 const isWild = (c: string) => c[1] === 'w';
@@ -355,6 +356,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</button>
 			</footer>
 
+			<TableChat gameId={id} me={me} people={names} chatLast={data.chatLast || 0} />
 			<Bubbles items={bubbles} allTop={!!view.finished} />
 			{party && <Confetti big={party === 'win'} />}
 			{toast && <div className="toast" role="alert">{toast}</div>}

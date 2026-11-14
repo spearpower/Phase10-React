@@ -25,7 +25,7 @@ export interface LobbyPlayer { id: number; seat: number; username: string; photo
 export interface GameData {
 	id: number; me: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned'; hostId: number; isMember: boolean;
 	pin: string | null; private: boolean; timerSec: number; version: number; deadline: string | null;
-	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; practice?: boolean;
+	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; practice?: boolean; chatLast?: number;
 }
 
 const RT_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;

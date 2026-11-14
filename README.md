@@ -8,6 +8,7 @@ A real-time card game for 2–6 friends, built mobile-first as an installable PW
 - **Board:** tap a card, then tap where it goes (a group, a rival's laid-down group, or the discard pile). It's laid out with CSS for portrait and landscape phones.
 - **Virtual Friends:** computer players (`lib/bot.ts`). Start a practice game against 1–5 of them, or add them to empty seats in a waiting room. An admin can switch the feature on or off. Practice games don't award leaderboard points.
 - **Table events:** bubbles and sounds for discards, phase completions, skips, your turn, round wins (crown) and game wins (crown, confetti, applause). Every phone works these out by comparing views, so all players see the same moments. The sounds are synthesized by `tools/gen_ding.py` and `tools/gen_sounds.py` into `public/sounds/`. One switch mutes them all, on the table or on the Account page.
+- **Table chat:** a floating button opens a side panel with public messages, quick emojis and an emoji picker for the players at the table. It shows an unread badge, a preview and a soft pop sound (`lib/chat.ts`, `components/TableChat.tsx`).
 - **Up to 6 players:** opponents sit in a grid sized to the table (1, 2, 3, 2×2 or 3+2), and cards go compact from 4 players up.
 - **Account:** change your username, name, contact details, avatar (from a pool of 34) and password.
 

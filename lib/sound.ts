@@ -2,12 +2,12 @@
 // Game sounds (public/sounds/*.wav, made by tools/gen_ding.py and tools/gen_sounds.py).
 // Phones only allow sound after the person has tapped once, so the first tap anywhere unlocks them.
 // One switch (Account page or the bell on the table) mutes them all.
-export type SoundName = 'turn' | 'discard' | 'phase' | 'round' | 'win' | 'skip';
+export type SoundName = 'turn' | 'discard' | 'phase' | 'round' | 'win' | 'skip' | 'chat';
 const FILES: Record<SoundName, string> = {
 	turn: '/sounds/turn.wav', discard: '/sounds/discard.wav', phase: '/sounds/phase.wav',
-	round: '/sounds/round.wav', win: '/sounds/win.wav', skip: '/sounds/skip.wav',
+	round: '/sounds/round.wav', win: '/sounds/win.wav', skip: '/sounds/skip.wav', chat: '/sounds/chat.wav',
 };
-const VOLUME: Record<SoundName, number> = { turn: 0.8, discard: 0.55, phase: 0.75, round: 0.8, win: 0.85, skip: 0.7 };
+const VOLUME: Record<SoundName, number> = { turn: 0.8, discard: 0.55, phase: 0.75, round: 0.8, win: 0.85, skip: 0.7, chat: 0.6 };
 const KEY = 'rummy10.sound';
 const players: Partial<Record<SoundName, HTMLAudioElement>> = {};
 let armed = false;

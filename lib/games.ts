@@ -251,7 +251,8 @@ function result(g: Pick<GameRow, 'status' | 'version' | 'turn_deadline' | 'next_
 /** Read a player's view. Also records they're online and applies an overdue timeout. */
 export async function getGame(user: Session, gameId: number) {
 	await sql`update game_players set last_seen = now() where game_id = ${gameId} and user_id = ${user.id}`;
-	let [g] = await sql<GameRow[]>`select * from games where id = ${gameId}`;
+	let [g] = await sql<(GameRow & { chat_last: number | null })[]>`
+		select g.*, (select max(m.id) from game_messages m where m.game_id = g.id) as chat_last from games g where g.id = ${gameId}`;
 	if (!g) throw new GameError('Game not found', 404);
 
 	// Turn timer ran out and nobody reported it (e.g. that player closed the app): play it now
@@ -267,7 +268,11 @@ export async function getGame(user: Session, gameId: number) {
 			await save(tx, locked, locked.state, locked.state.round !== before);
 			changed = true;
 		});
-		if (changed) { await ping(gameId); [g] = await sql<GameRow[]>`select * from games where id = ${gameId}`; }
+		if (changed) {
+			await ping(gameId);
+			[g] = await sql<(GameRow & { chat_last: number | null })[]>`
+				select g.*, (select max(m.id) from game_messages m where m.game_id = g.id) as chat_last from games g where g.id = ${gameId}`;
+		}
 	}
 
 	const players = await sql<{ user_id: number; seat: number; username: string; photo: string; online: boolean; is_bot: boolean }[]>`
@@ -292,6 +297,7 @@ export async function getGame(user: Session, gameId: number) {
 		deadline: g.turn_deadline ? g.turn_deadline.toISOString() : null,
 		serverNow: new Date().toISOString(),
 		nextGameId: g.next_game_id,
+		chatLast: isMember ? g.chat_last ?? 0 : 0,
 		players: players.map(p => ({ id: p.user_id, seat: p.seat, username: p.username, photo: p.photo, online: p.online, isBot: p.is_bot })),
 		practice: !!g.state?.bots?.length,
 		view,

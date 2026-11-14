@@ -4,6 +4,7 @@
   round.wav    short fanfare (a player went out and won the round)
   win.wav      fanfare + crowd applause (someone won the game)
   skip.wav     descending "womp" (you were skipped)
+  chat.wav     soft two-tone pop (a new chat message)
 The turn chime (turn.wav) comes from tools/gen_ding.py.
 Usage: python tools/gen_sounds.py
 """
@@ -146,6 +147,17 @@ def skip():
 	write('skip.wav', buf, 0.5)
 
 
+def chat():
+	buf = silence(0.32)
+	mix(buf, bell(880, 0.18, 0.8, ((1, 1, 22), (2, .2, 30))), 0.0)
+	mix(buf, bell(1318.5, 0.22, 0.7, ((1, 1, 18), (2, .2, 26))), 0.07)
+	write('chat.wav', buf, 0.4)
+
+
 if __name__ == '__main__':
+	import sys
 	os.makedirs(OUT, exist_ok=True)
-	discard(); phase(); round_win(); win(); skip()
+	only = sys.argv[1:]
+	for name, fn in [('discard', discard), ('phase', phase), ('round', round_win), ('win', win), ('skip', skip), ('chat', chat)]:
+		if not only or name in only:
+			fn()

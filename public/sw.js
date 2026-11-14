@@ -4,14 +4,14 @@
  * - Navigations fall back to /offline.html when the network is down.
  * Bump VERSION when the precached files change.
  */
-const VERSION = 'rummy10-v3.3.0';
+const VERSION = 'rummy10-v3.4.0';
 const STATIC_CACHE = VERSION + '-static';
 
 const CARDS = [];
 ['r', 'b', 'y', 'g'].forEach(c => { for (let n = 1; n <= 12; n++) CARDS.push('/cards/' + c + n + '.svg'); });
 ['ww', 'ss', 'back'].forEach(n => CARDS.push('/cards/' + n + '.svg'));
 
-const PRECACHE = ['/offline.html', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/sounds/turn.wav', '/sounds/discard.wav', '/sounds/phase.wav', '/sounds/round.wav', '/sounds/win.wav', '/sounds/skip.wav'].concat(CARDS);
+const PRECACHE = ['/offline.html', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/sounds/turn.wav', '/sounds/discard.wav', '/sounds/phase.wav', '/sounds/round.wav', '/sounds/win.wav', '/sounds/skip.wav', '/sounds/chat.wav'].concat(CARDS);
 
 self.addEventListener('install', event => {
 	event.waitUntil(caches.open(STATIC_CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting()));

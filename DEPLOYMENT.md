@@ -99,6 +99,7 @@ New features sometimes need database changes. These live in `db/migrations/` and
 | File | Adds |
 |---|---|
 | `001_virtual_friends_accounts.sql` | Virtual Friends (6 computer players), the `app_settings` table (admin switches), `users.is_bot` |
+| `002_game_chat.sql` | `game_messages`: the table chat (public messages and emojis per game) |
 
 To make someone an admin, run `update users set role = 'admin' where lower(username) = lower('their-name');`. The **Admin** link then appears on their Account page.
 
