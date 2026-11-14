@@ -94,4 +94,4 @@ export function useGame(id: number) {
 
 export { avatarUrl as avatar } from './avatars';
 export const cardSrc = (code: string) => `/cards/${code.slice(1)}.svg`;
-export function haptic(ms = 12) { try { navigator.vibrate?.(ms); } catch { /* not supported */ } }
+export function haptic(ms: number | number[] = 12) { try { navigator.vibrate?.(ms); } catch { /* not supported (iPhone) */ } }

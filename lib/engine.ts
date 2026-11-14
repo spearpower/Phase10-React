@@ -8,6 +8,10 @@ export class GameError extends Error {
 }
 
 export type Step = 'draw' | 'play' | 'skip';
+export type BotLevel = 'easy' | 'normal' | 'smart';
+
+/** A person whose turn times out this many times in a row is taken out of the game. */
+export const AWAY_TURNS = 3;
 
 export interface PlayerState {
 	id: number;
@@ -39,6 +43,8 @@ export interface GameState {
 	log: string[];                         // short recent events, newest first
 	reshuffles?: number;                   // deck refills this round (stalemate guard)
 	bots?: number[];                       // Virtual Friends at this table (played by lib/bot.ts)
+	botLevel?: BotLevel;                   // how well the Virtual Friends play (default normal)
+	missed?: Record<string, number>;       // turns in a row each person ran out of time
 }
 
 export type Action =
@@ -135,6 +141,7 @@ function refillDeck(s: GameState): void {
 export function apply(s: GameState, me: number, a: Action): { roundEnded: boolean } {
 	if (s.finished) throw new GameError('This game has finished');
 	const p = P(s, me);
+	if (s.missed?.[String(me)]) delete s.missed[String(me)]; // they're here: reset the away count
 	const myTurn = s.turn === me;
 	const needTurn = (step?: Step) => {
 		if (!myTurn) throw new GameError('It is not your turn');
@@ -259,6 +266,7 @@ export function removePlayer(s: GameState, id: number, note: string): number {
 	delete s.players[String(id)];
 	s.order = s.order.filter(x => x !== id);
 	if (s.bots) s.bots = s.bots.filter(x => x !== id);
+	if (s.missed) delete s.missed[String(id)];
 	log(s, `${who(id)} ${note}`);
 	if (s.order.length >= 2 && s.turn === id && next !== null) beginTurn(s, next);
 	if (s.order.length < 2) s.turn = null;
@@ -274,6 +282,20 @@ export function autoPlay(s: GameState): { roundEnded: boolean } {
 	if (s.finished || s.turn === null) return { roundEnded: false };
 	const id = s.turn;
 	const p = s.players[String(id)];
+	const person = !s.bots?.includes(id);
+	const missedBefore = s.missed?.[String(id)] || 0;
+	const r = autoPlayTurn(s, id, p);
+	if (person && s.players[String(id)] && !s.finished) s.missed = { ...(s.missed || {}), [String(id)]: missedBefore + 1 };
+	return r;
+}
+
+/** The person this many turns away (or more) should be taken out. */
+export function awayPlayer(s: GameState, id: number | null): number | null {
+	if (id === null || s.finished || !s.players[String(id)] || s.bots?.includes(id)) return null;
+	return (s.missed?.[String(id)] || 0) >= AWAY_TURNS ? id : null;
+}
+
+function autoPlayTurn(s: GameState, id: number, p: PlayerState): { roundEnded: boolean } {
 	if (!p.done && p.groups.some(g => g.length)) apply(s, id, { type: 'unstage' });
 	if (s.step === 'draw') apply(s, id, { type: 'draw', from: 'deck' });
 	if (s.step === 'play') {

@@ -2,7 +2,7 @@
 // with the game row locked (SELECT ... FOR UPDATE), so simultaneous moves can't interleave.
 import type postgres from 'postgres';
 import { sql } from './db';
-import { Action, apply, autoPlay, GameError, GameState, GameView, newGame, removePlayer, viewFor } from './engine';
+import { Action, apply, autoPlay, AWAY_TURNS, awayPlayer, BotLevel, GameError, GameState, GameView, newGame, removePlayer, viewFor } from './engine';
 import { Condition } from './rules';
 import { botTurn } from './bot';
 import { getSettings } from './settings';
@@ -13,6 +13,10 @@ type Tx = postgres.TransactionSql<{}>;
 
 export const ROUND_SUMMARY_SECONDS = 8; // extra time on the first turn of a round while players read the summary
 const ONLINE_SECONDS = 20;
+/** Games with no moves for this long are closed (lobbies: abandoned; games in play: ended, no points). */
+export const STALE_HOURS = 24;
+export const BOT_LEVELS: BotLevel[] = ['easy', 'normal', 'smart'];
+export const asBotLevel = (x: unknown): BotLevel => (BOT_LEVELS.includes(x as BotLevel) ? (x as BotLevel) : 'normal');
 const MAX_VIRTUAL_FRIENDS = 5;
 /** A Virtual Friend "thinks" for 1.4–2.4 s so people can follow the play. */
 const botSeconds = () => 1.4 + Math.random();
@@ -65,6 +69,7 @@ export async function createGame(user: Session, pin: string | null, timerSec: nu
 }
 
 export async function listOpenGames(user: Session, publicOnly: boolean, search: string) {
+	await closeStaleGamesSometimes();
 	const s = search.replace(/\D/g, '');
 	return sql<{ id: number; private: boolean; host: string; photo: string; players: number; created_at: Date }[]>`
 		select g.id, (g.pin is not null) as private, h.username as host, h.photo, g.created_at,
@@ -82,6 +87,7 @@ export async function listOpenGames(user: Session, publicOnly: boolean, search: 
 }
 
 export async function listMyGames(user: Session) {
+	await closeStaleGamesSometimes();
 	return sql<{ id: number; round: number; host: string; photo: string; players: number; my_turn: boolean }[]>`
 		select g.id, g.round, h.username as host, h.photo,
 		       (select count(*)::int from game_players p where p.game_id = g.id) as players,
@@ -180,31 +186,82 @@ export async function endGame(user: Session, gameId: number, reasonRaw: unknown)
 }
 
 /** Take one player out of a running game; end it if fewer than 2 players (or no people) remain. */
-async function takeOut(tx: Tx, g: GameRow, target: number, by: number, reason: string, note: string) {
+async function takeOut(tx: Tx, g: GameRow, target: number, by: number | null, reason: string, note: string, roundBefore = g.state!.round) {
 	const state = g.state!;
 	if (!state.players[String(target)]) throw new GameError('That player is not in this game', 404);
-	const before = state.round;
 	const left = removePlayer(state, target, note);
 	await tx`update game_players set left_at = now(), left_reason = ${reason}, left_by = ${by} where game_id = ${g.id} and user_id = ${target}`;
 	const people = state.order.filter(id => !state.bots?.includes(id)).length;
-	if (left < 2 || people === 0) {
-		await finishEarly(tx, g, state, null, left < 2 ? 'Not enough players left' : 'Only Virtual Friends were left');
-		return;
-	}
-	await save(tx, g, state, state.round !== before);
+	if (left < 2 || people === 0) return finishEarly(tx, g, state, null, left < 2 ? 'Not enough players left' : 'Only Virtual Friends were left');
+	return save(tx, g, state, state.round !== roundBefore);
+}
+
+export const AWAY_REASON = `Away · missed ${AWAY_TURNS} turns in a row`;
+
+/** After a timed-out turn: save, taking the player out if they've now missed AWAY_TURNS turns in a row. */
+async function saveAfterTimeout(tx: Tx, g: GameRow, state: GameState, timedOut: number | null, roundBefore: number) {
+	const away = awayPlayer(state, timedOut);
+	if (away === null) return save(tx, g, state, state.round !== roundBefore);
+	return takeOut(tx, { ...g, state }, away, null, AWAY_REASON, `was taken out · ${AWAY_REASON.toLowerCase()}`, roundBefore);
 }
 
 async function finishEarly(tx: Tx, g: GameRow, state: GameState, by: number | null, reason: string) {
 	state.turn = null;
 	state.log.unshift(by ? `Game ended by {${by}} · ${reason}` : `Game ended · ${reason}`);
 	state.log.length = Math.min(state.log.length, 6);
-	await tx`
+	const [row] = await tx<{ version: number; turn_deadline: Date | null; status: string }[]>`
 		update games set state = ${tx.json(state as never)}, status = 'ended', end_reason = ${reason}, ended_by = ${by},
 			turn_user_id = null, turn_deadline = null, finished_at = now(), version = version + 1
-		where id = ${g.id}`;
+		where id = ${g.id}
+		returning version, turn_deadline, status`;
+	return row;
 }
 
-export async function startGame(user: Session, gameId: number, timerSec: number): Promise<void> {
+// ---------- Stuck games ----------
+
+let lastSweep = 0;
+/** Runs the stale-game sweep at most every 10 minutes per server instance (cheap, called from lists). */
+async function closeStaleGamesSometimes() {
+	if (Date.now() - lastSweep < 10 * 60 * 1000) return;
+	lastSweep = Date.now();
+	try { await closeStaleGames(); } catch (e) { console.error('stale sweep', e); }
+}
+
+/** Close games nobody has touched for STALE_HOURS. Returns how many lobbies and games were closed. */
+export async function closeStaleGames(): Promise<{ lobbies: number; games: number }> {
+	const reason = `No moves for ${STALE_HOURS} hours`;
+	const lobbies = await sql`
+		update games set status = 'abandoned'
+		where status = 'lobby' and updated_at < now() - make_interval(hours => ${STALE_HOURS})
+		returning id`;
+	const games = await sql<{ id: number; version: number }[]>`
+		update games set status = 'ended', end_reason = ${reason}, ended_by = null,
+			turn_user_id = null, turn_deadline = null, finished_at = now(), version = version + 1,
+			state = case when state is null then null else jsonb_set(
+				jsonb_set(state, '{turn}', 'null'::jsonb), '{log}',
+				jsonb_build_array(${'Game ended · ' + reason}::text) || coalesce(state->'log', '[]'::jsonb)) end
+		where status = 'playing' and updated_at < now() - make_interval(hours => ${STALE_HOURS})
+		returning id, version`;
+	for (const g of games) await notifyGame(g.id, g.version);
+	if (lobbies.length || games.length) await notifyLobbyList();
+	return { lobbies: lobbies.length, games: games.length };
+}
+
+/** Admin overview: every table being played right now. */
+export async function liveTables() {
+	return sql<{ id: number; host: string; round: number; timer_sec: number; updated_at: Date; created_at: Date; practice: boolean; players: { id: number; username: string; photo: string; isBot: boolean }[]; turn: string | null }[]>`
+		select g.id, h.username as host, g.round, g.timer_sec, g.updated_at, g.created_at,
+		       coalesce(jsonb_array_length(g.state->'bots'), 0) > 0 as practice,
+		       (select coalesce(json_agg(json_build_object('id', u.id, 'username', u.username, 'photo', u.photo, 'isBot', u.is_bot) order by p.seat), '[]'::json)
+		          from game_players p join users u on u.id = p.user_id where p.game_id = g.id and p.left_at is null) as players,
+		       (select username from users where id = g.turn_user_id) as turn
+		from games g join users h on h.id = g.host_id
+		where g.status = 'playing'
+		order by g.updated_at desc
+		limit 100`;
+}
+
+export async function startGame(user: Session, gameId: number, timerSec: number, level: BotLevel = 'normal'): Promise<void> {
 	await sql.begin(async tx => {
 		const g = await lock(tx, gameId);
 		if (g.host_id !== user.id) throw new GameError('Only the host can start the game', 403);
@@ -216,6 +273,7 @@ export async function startGame(user: Session, gameId: number, timerSec: number)
 		if (bots.length && !(await getSettings()).virtualFriends) throw new GameError('Virtual Friends are switched off. Remove them to start.', 409);
 		const state = newGame(g.edition, players.map(p => p.user_id), await phasesFor(g.edition));
 		state.bots = bots;
+		if (bots.length) state.botLevel = level;
 		await tx`update games set timer_sec = ${timerSec} where id = ${gameId}`;
 		await save(tx, { ...g, timer_sec: timerSec }, state, false); // round 1: no summary to read
 	});
@@ -268,7 +326,7 @@ export async function addVirtualFriend(user: Session, gameId: number): Promise<v
 }
 
 /** One tap: a private table with `count` Virtual Friends that starts right away. */
-export async function startPractice(user: Session, count: number, timerSec: number): Promise<number> {
+export async function startPractice(user: Session, count: number, timerSec: number, level: BotLevel = 'normal'): Promise<number> {
 	if (!(await getSettings()).virtualFriends) throw new GameError('Virtual Friends are switched off by the admin', 403);
 	const n = Math.max(1, Math.min(MAX_VIRTUAL_FRIENDS, Math.floor(count)));
 	const phases = await phasesFor(1);
@@ -282,6 +340,7 @@ export async function startPractice(user: Session, count: number, timerSec: numb
 		for (let i = 0; i < ids.length; i++) await tx`insert into game_players (game_id, user_id, seat) values (${g.id}, ${ids[i]}, ${i + 1})`;
 		const state = newGame(1, ids, phases);
 		state.bots = bots.map(b => b.id);
+		state.botLevel = level;
 		await save(tx, g, state, false);
 		return g.id;
 	});
@@ -305,10 +364,12 @@ export async function move(user: Session, gameId: number, action: Action): Promi
 		if (action.type === 'timeout') {
 			// Any player's device may report the timer; the server decides if it really ran out
 			if (!g.turn_deadline || g.turn_deadline.getTime() > Date.now() + 1000) return result(g, state, user.id, false);
+			const timedOut = state.turn;
 			runDueTurn(state);
-		} else {
-			apply(state, user.id, action);
+			const saved = await saveAfterTimeout(tx, g, state, timedOut, before);
+			return result({ ...g, ...saved }, state, user.id, true);
 		}
+		apply(state, user.id, action);
 		const saved = await save(tx, g, state, state.round !== before);
 		return result({ ...g, ...saved }, state, user.id, true);
 	});
@@ -318,7 +379,7 @@ function result(g: Pick<GameRow, 'status' | 'version' | 'turn_deadline' | 'next_
 	return {
 		changed, status: g.status, version: g.version,
 		deadline: g.turn_deadline ? new Date(g.turn_deadline).toISOString() : null,
-		serverNow: new Date().toISOString(), nextGameId: g.next_game_id, view: viewFor(state, me),
+		serverNow: new Date().toISOString(), nextGameId: g.next_game_id, view: state.players[String(me)] ? viewFor(state, me) : null, // null: they were just taken out
 	};
 }
 
@@ -338,8 +399,9 @@ export async function getGame(user: Session, gameId: number) {
 			const locked = await lock(tx, gameId);
 			if (locked.status !== 'playing' || !locked.state || !locked.turn_deadline || locked.turn_deadline.getTime() >= Date.now() - grace(locked)) return;
 			const before = locked.state.round;
+			const timedOut = locked.state.turn;
 			runDueTurn(locked.state);
-			await save(tx, locked, locked.state, locked.state.round !== before);
+			await saveAfterTimeout(tx, locked, locked.state, timedOut, before);
 			changed = true;
 		});
 		if (changed) {

@@ -4,7 +4,7 @@
  * - Navigations fall back to /offline.html when the network is down.
  * Bump VERSION when the precached files change.
  */
-const VERSION = 'rummy10-v3.4.0';
+const VERSION = 'rummy10-v3.5.0';
 const STATIC_CACHE = VERSION + '-static';
 
 const CARDS = [];

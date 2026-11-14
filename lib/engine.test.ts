@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isRunInOrder, isValidGroup, placeInGroup, meetsCondition, Condition } from './rules';
-import { apply, autoPlay, countCards, GameError, GameState, newGame, removePlayer, viewFor } from './engine';
+import { apply, autoPlay, AWAY_TURNS, awayPlayer, countCards, GameError, GameState, newGame, removePlayer, viewFor } from './engine';
 import { penalty } from './cards';
 
 const CLASSIC: Record<string, Condition[]> = {
@@ -143,6 +143,28 @@ describe('engine', () => {
 		expect(s.log[0]).toContain('left the game');
 		expect(removePlayer(s, s.order[0], 'was removed')).toBe(1);
 		expect(s.turn).toBeNull();
+	});
+
+	it('away: timeouts in a row are counted, any own move resets the count, Virtual Friends never count', () => {
+		const s = newGame(1, [1, 2, 3], CLASSIC);
+		s.bots = [3];
+		const first = s.turn!;
+		for (let i = 0; i < 3 * AWAY_TURNS; i++) autoPlay(s);
+		if (first !== 3) expect(s.missed?.[String(first)]).toBe(AWAY_TURNS);
+		expect(s.missed?.['3']).toBeUndefined();
+		expect(awayPlayer(s, 3)).toBeNull();
+		// person 1 or 2 is away now
+		const person = [1, 2].find(x => (s.missed?.[String(x)] || 0) >= AWAY_TURNS)!;
+		expect(awayPlayer(s, person)).toBe(person);
+		// once they act themselves, the count resets
+		while (s.turn !== person) autoPlay(s);
+		apply(s, person, { type: 'draw', from: 'deck' });
+		expect(s.missed?.[String(person)]).toBeUndefined();
+		autoPlay(s); // ran out of time after drawing: counts as one missed turn
+		expect(s.missed?.[String(person)]).toBe(1);
+		removePlayer(s, person, 'was taken out');
+		expect(s.missed?.[String(person)]).toBeUndefined();
+		expect(countCards(s)).toBe(108);
 	});
 
 	it('timeout auto-plays a legal turn', () => {

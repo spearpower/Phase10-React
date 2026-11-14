@@ -18,7 +18,7 @@ const isEmojiOnly = (s: string) => {
 };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-export default function TableChat({ gameId, me, people, chatLast }: { gameId: number; me: number; people: Record<number, Person>; chatLast: number }) {
+export default function TableChat({ gameId, me, people, chatLast, onEmoji }: { gameId: number; me: number; people: Record<number, Person>; chatLast: number; onEmoji?: (userId: number, emoji: string) => void }) {
 	const [open, setOpen] = useState(false);
 	const [msgs, setMsgs] = useState<Msg[]>([]);
 	const [text, setText] = useState('');
@@ -63,13 +63,16 @@ export default function TableChat({ gameId, me, people, chatLast }: { gameId: nu
 				return;
 			}
 			const incoming = messages.filter(m => m.userId !== me);
+			// emoji-only messages also float up from the sender's seat (reactions)
+			for (const m of incoming) if (isEmojiOnly(m.body)) onEmoji?.(m.userId, m.body);
+			const words = incoming.filter(m => !isEmojiOnly(m.body));
 			if (incoming.length) {
 				playSound('chat');
-				if (!open) { setPreview(incoming[incoming.length - 1]); haptic(15); }
+				if (!open && words.length) { setPreview(words[words.length - 1]); haptic(15); }
 			}
 		} catch { /* the feed will try again */ }
 		finally { fetching.current = false; }
-	}, [gameId, me, open, KEY]);
+	}, [gameId, me, open, KEY, onEmoji]);
 
 	// first load, then whenever the table feed says there's a newer message
 	useEffect(() => { if (!loaded.current || chatLast > lastId.current) fetchNew(); }, [chatLast, fetchNew]);
@@ -100,6 +103,7 @@ export default function TableChat({ gameId, me, people, chatLast }: { gameId: nu
 		const temp: Msg = { id: -Date.now(), userId: me, body: clean, at: new Date().toISOString(), pending: true };
 		setMsgs(prev => [...prev, temp]);
 		setText(''); setPicker(false); haptic(6);
+		if (isEmojiOnly(clean)) onEmoji?.(me, clean);
 		requestAnimationFrame(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' }));
 		try {
 			const { message } = await api<{ message: Msg }>(`/api/games/${gameId}/chat`, { text: clean });

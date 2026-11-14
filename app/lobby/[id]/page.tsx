@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, avatar, useGame } from '@/lib/client';
 import { ErrorBanner, NavBar, Skeleton } from '@/components/ui';
 import PinSheet from '@/components/PinSheet';
+import { LEVELS } from '@/lib/levels';
 
 const TIMERS = [0, 20, 30, 40, 60];
 
@@ -13,6 +14,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 	const router = useRouter();
 	const { data, error: loadError, refresh } = useGame(id);
 	const [timer, setTimer] = useState(40);
+	const [level, setLevel] = useState<'easy' | 'normal' | 'smart'>('normal');
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [pinOpen, setPinOpen] = useState(false);
@@ -37,9 +39,14 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 			<main><div className="empty"><strong>This table was closed</strong>The host cancelled this game.<Link className="btn btn-primary" href="/join">Find Another Table</Link></div></main></div>
 	);
 
+	const inviteText = () => `Join my Rummy10 table — game ${id}${data.pin ? `, PIN ${data.pin}` : ''}`;
+	const whatsapp = () => {
+		const url = `${location.origin}/lobby/${id}`;
+		window.open(`https://wa.me/?text=${encodeURIComponent(`${inviteText()}: ${url}`)}`, '_blank', 'noopener');
+	};
 	const invite = async () => {
 		const url = `${location.origin}/lobby/${id}`;
-		const text = `Join my Rummy10 table — game ${id}${data.pin ? `, PIN ${data.pin}` : ''}`;
+		const text = inviteText();
 		try {
 			if (navigator.share) await navigator.share({ title: 'Rummy10', text, url });
 			else { await navigator.clipboard.writeText(`${text}: ${url}`); setCopied(true); setTimeout(() => setCopied(false), 2500); }
@@ -85,6 +92,28 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 					))}
 				</div>
 
+				{data.isMember && (
+					<div className="share-row">
+						<button type="button" className="btn-share wa" onClick={whatsapp}>
+							<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z" /><path d="M8.8 8.6c.2-.5.5-.5.8-.5h.5c.2 0 .4.1.5.4l.7 1.6c.1.2 0 .4-.1.6l-.5.6c-.1.2-.1.3 0 .5.6 1 1.4 1.8 2.5 2.4.2.1.4.1.5-.1l.6-.7c.2-.2.4-.2.6-.1l1.6.8c.2.1.3.3.3.5 0 .8-.6 1.6-1.4 1.8-.7.2-1.7.1-3.4-.8-2-1.1-3.3-3-3.6-3.6-.4-.6-.8-1.8-.2-2.9Z" /></svg>
+							Share on WhatsApp
+						</button>
+						<button type="button" className="btn-share" onClick={invite}>{copied ? 'Link copied' : 'More ways to share'}</button>
+					</div>
+				)}
+
+				{isHost && data.players.some(p => p.isBot) && (
+					<>
+						<div className="section-title">Virtual Friends play</div>
+						<div className="segmented" role="radiogroup" aria-label="How well Virtual Friends play">
+							{LEVELS.map(l => (
+								<label key={l.v}><input type="radio" name="level" checked={level === l.v} onChange={() => setLevel(l.v)} /><span>{l.label}</span></label>
+							))}
+						</div>
+						<p className="hint">{LEVELS.find(l => l.v === level)!.note}</p>
+					</>
+				)}
+
 				{isHost && (
 					<>
 						<div className="section-title">Turn timer</div>
@@ -104,7 +133,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 					) : isHost ? (
 						<>
 							<button className="btn btn-primary" type="button" disabled={busy || data.players.length < 2}
-								onClick={() => act(async () => { await api(`/api/games/${id}/start`, { timer }); router.replace(`/game/${id}`); })}>
+								onClick={() => act(async () => { await api(`/api/games/${id}/start`, { timer, level }); router.replace(`/game/${id}`); })}>
 								{data.players.length < 2 ? (vfOn ? 'Invite a friend or add a Virtual Friend' : 'Waiting for players…') : 'Start Game'}
 							</button>
 							<button className="btn btn-plain" type="button" disabled={busy}

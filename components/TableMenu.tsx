@@ -3,19 +3,20 @@
 // Every action asks for a reason; "Others" lets people type their own.
 import { useState } from 'react';
 import { api, avatar } from '@/lib/client';
+import HowToPlay from './HowToPlay';
 
 export const LEAVE_REASONS = ['Back to work', 'Family', 'Internet', 'Visitor'];
 export const REMOVE_REASONS = ['Not responding', 'Left the table', 'Unfair play'];
 export const END_REASONS = ['Time’s up', 'Players left', 'Network problems', 'Starting a new game'];
 
 interface Person { id: number; username: string; photo: string; isBot?: boolean; left?: boolean }
-type Step = { kind: 'menu' } | { kind: 'pick' } | { kind: 'reason'; action: 'leave' | 'remove' | 'end'; target?: Person };
+type Step = { kind: 'menu' } | { kind: 'pick' } | { kind: 'rules' } | { kind: 'reason'; action: 'leave' | 'remove' | 'end'; target?: Person };
 
 export default function TableMenu({ gameId, me, canManage, players, inGame, onClose, onDone }: {
 	gameId: number; me: number; canManage: boolean; players: Person[]; inGame: boolean;
 	onClose: () => void; onDone: (what: 'left' | 'removed' | 'ended') => void;
 }) {
-	const [step, setStep] = useState<Step>(inGame ? { kind: 'menu' } : { kind: 'pick' });
+	const [step, setStep] = useState<Step>({ kind: 'menu' });
 	const others = players.filter(p => p.id !== me && !p.left);
 	return (
 		<div className="sheet-backdrop" onClick={onClose}>
@@ -25,10 +26,16 @@ export default function TableMenu({ gameId, me, canManage, players, inGame, onCl
 					<>
 						<h2>Table options</h2>
 						<div className="list" style={{ marginTop: 12 }}>
-							<button type="button" className="list-row" onClick={() => setStep({ kind: 'reason', action: 'leave' })}>
-								<span className="opt-ico" aria-hidden="true">🚪</span>
-								<span className="main"><span className="title">Leave game</span><span className="sub">Your cards go back into the deck</span></span>
+							<button type="button" className="list-row" onClick={() => setStep({ kind: 'rules' })}>
+								<span className="opt-ico" aria-hidden="true">📖</span>
+								<span className="main"><span className="title">How to play</span><span className="sub">Phases, special cards and scoring</span></span>
 							</button>
+							{inGame && (
+								<button type="button" className="list-row" onClick={() => setStep({ kind: 'reason', action: 'leave' })}>
+									<span className="opt-ico" aria-hidden="true">🚪</span>
+									<span className="main"><span className="title">Leave game</span><span className="sub">Your cards go back into the deck</span></span>
+								</button>
+							)}
 							{canManage && others.length > 0 && (
 								<button type="button" className="list-row" onClick={() => setStep({ kind: 'pick' })}>
 									<span className="opt-ico" aria-hidden="true">👤</span>
@@ -57,7 +64,14 @@ export default function TableMenu({ gameId, me, canManage, players, inGame, onCl
 								</button>
 							))}
 						</div>
-						<button className="btn btn-plain" type="button" onClick={() => (inGame ? setStep({ kind: 'menu' }) : onClose())} style={{ marginTop: 10 }}>Back</button>
+						<button className="btn btn-plain" type="button" onClick={() => setStep({ kind: 'menu' })} style={{ marginTop: 10 }}>Back</button>
+					</>
+				)}
+				{step.kind === 'rules' && (
+					<>
+						<h2>How to play</h2>
+						<div className="sheet-scroll"><HowToPlay /></div>
+						<button className="btn btn-plain" type="button" onClick={() => setStep({ kind: 'menu' })} style={{ marginTop: 10 }}>Back</button>
 					</>
 				)}
 				{step.kind === 'reason' && (

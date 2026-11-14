@@ -119,13 +119,22 @@ export default function AccountPage() {
 					<ErrorBanner>{pwError}</ErrorBanner>
 				</form>
 
+				<div className="section-title">Help</div>
+				<nav className="group">
+					<Link className="row-link" href="/how-to-play">
+						<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5" /></svg></span>
+						<span className="row-text"><span className="row-title">How to Play</span><span className="row-sub">Phases, special cards and scoring</span></span>
+						<Chevron />
+					</Link>
+				</nav>
+
 				{(acc.role === 'admin' || acc.role === 'superadmin') && (
 					<>
 						<div className="section-title">Admin</div>
 						<nav className="group">
 							<Link className="row-link" href="/admin">
 								<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3Z" /></svg></span>
-								<span className="row-text"><span className="row-title">Game Settings</span><span className="row-sub">Virtual Friends on or off</span></span>
+								<span className="row-text"><span className="row-title">Game Settings</span><span className="row-sub">Virtual Friends, live tables, stuck games</span></span>
 								<Chevron />
 							</Link>
 						</nav>

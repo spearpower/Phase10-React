@@ -9,6 +9,10 @@ import { initSound, playSound, playTurnSound, setSoundOn, soundOn } from '@/lib/
 import { Bubbles, Confetti, Crown, type Bubble, type BubbleKind } from '@/components/Celebrate';
 import TableChat from '@/components/TableChat';
 import TableMenu from '@/components/TableMenu';
+import { hintFor, type Hint } from '@/lib/plan';
+
+const REACTIONS = ['👏', '😂', '😮', '🔥', '👍', '😭'];
+const SORT_KEY = 'rummy10.sort';
 
 // Pure helpers (no node 'crypto' import on the client)
 const isWild = (c: string) => c[1] === 'w';
@@ -29,7 +33,13 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const inflight = useRef(0);
 	const [fresh, setFresh] = useState<string[]>([]);     // cards that just arrived in the hand
 	const prevHand = useRef<string[] | null>(null);
-	const [sort, setSort] = useState<Sort>('number');
+	const [sort, setSortState] = useState<Sort>('number');
+	useEffect(() => { try { const v = localStorage.getItem(SORT_KEY); if (v === 'number' || v === 'colour' || v === 'dealt') setSortState(v); } catch { /* ignore */ } }, []);
+	const setSort = (next: Sort) => { setSortState(next); try { localStorage.setItem(SORT_KEY, next); } catch { /* ignore */ } };
+	const [tip, setTip] = useState<Hint | null>(null);
+	const [trayOpen, setTrayOpen] = useState(false);
+	const [floats, setFloats] = useState<{ key: number; emoji: string; x: number; y: number }[]>([]);
+	const floatSeq = useRef(0);
 	const [seenRound, setSeenRound] = useState(0);
 	const [left, setLeft] = useState<number | null>(null);
 	const reported = useRef<string | null>(null);
@@ -104,6 +114,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			}
 			const gone = /^\{(\d+)\} left the game · (.+)$/.exec(line);
 			if (gone) { bubble(`${who(Number(gone[1]))} left the game · ${gone[2]}`, 'skip', 3500); playSound('skip'); }
+			const away = /^\{(\d+)\} was taken out · (.+)$/.exec(line);
+			if (away) { bubble(`${who(Number(away[1]))} was taken out · ${away[2]}`, 'skip', 3800); playSound('skip'); }
 			const out = /^\{(\d+)\} was removed by \{(\d+)\} · (.+)$/.exec(line);
 			if (out) { bubble(`${who(Number(out[2]))} removed ${who(Number(out[1]))} · ${out[3]}`, 'skip', 3500); playSound('skip'); }
 			const sk = /^\{(\d+)\} skipped \{(\d+)\}$/.exec(line);
@@ -124,13 +136,28 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	useEffect(() => { if (!party) return; const t = setTimeout(() => setParty(null), party === 'win' ? 4200 : 2400); return () => clearTimeout(t); }, [party]);
 
+	// a hint is only good for the hand it was worked out for
+	const handKey = (view?.hand || []).join(',') + '|' + view?.turn + '|' + view?.step;
+	useEffect(() => { setTip(null); }, [handKey]);
+	useEffect(() => { if (!tip) return; const t = setTimeout(() => setTip(null), 12000); return () => clearTimeout(t); }, [tip]);
+
+	/** Float an emoji up from someone's seat (theirs on the table, or my hand area). */
+	const floatEmoji = useCallback((uid: number, emoji: string) => {
+		const el = document.querySelector(`[data-seat="${uid}"]`);
+		if (!el) return;
+		const r = el.getBoundingClientRect();
+		const key = ++floatSeq.current;
+		setFloats(f => [...f.slice(-7), { key, emoji, x: r.left + r.width / 2 + (Math.random() * 40 - 20), y: r.top + Math.min(r.height / 2, 40) }]);
+		setTimeout(() => setFloats(f => f.filter(x => x.key !== key)), 1900);
+	}, []);
+
 	// keep the selection valid
 	useEffect(() => { if (selected && view && !view.hand.includes(selected)) setSelected(null); }, [view, selected]);
 
 	// haptic tick when your turn starts
 	const myTurn = !!view && view.turn === me;
 	useEffect(() => {
-		if (myTurn && !wasMyTurn.current) { haptic(30); playTurnSound(); if (prevView.current) bubble('Your turn!', 'turn', 1800); }
+		if (myTurn && !wasMyTurn.current) { haptic([90, 60, 90]); playTurnSound(); if (prevView.current) bubble('Your turn!', 'turn', 1800); }
 		wasMyTurn.current = myTurn;
 	}, [myTurn]);
 
@@ -151,6 +178,10 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	}, [data?.deadline, data?.status, id, accept, refresh, serverNow]);
 
 	const say = (msg: string) => { setToast(msg); haptic(8); setTimeout(() => setToast(t => (t === msg ? '' : t)), 2600); };
+	const react = (emoji: string) => {
+		setTrayOpen(false); haptic(8); floatEmoji(me, emoji);
+		api(`/api/games/${id}/chat`, { text: emoji }).catch(e => say((e as Error).message));
+	};
 
 	/** Show the predicted result now, send the move in order, and reconcile with the server's answer. */
 	const send = useCallback((action: Action) => {
@@ -176,10 +207,13 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	if (data?.myLeft) {
 		const byMe = data.myLeft.by === data.me;
+		const away = data.myLeft.by === null;
 		return (
 			<div className="app centered"><main className="center">
-				<div className="brand"><img src="/icons/icon-192.png" alt="" /><h1 className="large-title">{byMe ? 'You left this game' : 'You were removed'}</h1></div>
-				<p className="subtitle">{byMe ? `Reason: ${data.myLeft.reason || '—'}` : `${data.myLeft.byName || 'The host'} removed you from game ${data.id}. Reason: ${data.myLeft.reason || '—'}`}</p>
+				<div className="brand"><img src="/icons/icon-192.png" alt="" /><h1 className="large-title">{byMe ? 'You left this game' : away ? 'You were taken out' : 'You were removed'}</h1></div>
+				<p className="subtitle">{byMe ? `Reason: ${data.myLeft.reason || '—'}`
+					: away ? `Your turn ran out of time 3 times in a row, so game ${data.id} carried on without you.`
+					: `${data.myLeft.byName || 'The host'} removed you from game ${data.id}. Reason: ${data.myLeft.reason || '—'}`}</p>
 				<Link className="btn btn-primary" href="/">Back to Play</Link>
 			</main></div>
 		);
@@ -196,7 +230,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			</main></div>
 		);
 	}
-	if (!data || !view) {
+	if (!data || !view || !view.players.some(p => p.id === me)) {
 		return (
 			<div className="board" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
 				<div className="thint">{loadError || 'Dealing cards…'}</div>
@@ -227,6 +261,18 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	} else {
 		hint = names[view.turn!]?.isBot ? `${nameOf(view.turn!)} is thinking…` : `${nameOf(view.turn!)}’s turn${mine.skipped ? ' · You’ll be skipped' : ''}`;
 	}
+
+	const askHint = () => {
+		if (!myTurn) return say('Hints work on your turn');
+		const tables = view.players.filter(p => p.done && p.groups).map(p => ({ conds: p.conditions, groups: p.groups! }));
+		const h = hintFor({ step, hand: view.hand.filter(c => c !== PENDING), staged: mine.groups || [], done: mine.done, conds: mine.conditions, phase: mine.phase, top: top || null, tables });
+		setTip(h); haptic(10);
+	};
+	const arrange = (plan: string[][]) => {
+		setTip(null);
+		if (staged) send({ type: 'unstage' });
+		plan.forEach((g, gi) => g.forEach(card => send({ type: 'place', card, group: gi, end: 'end' })));
+	};
 
 	// ----- actions -----
 	const tapDeck = () => { if (myTurn && step === 'draw') { fly('[data-drop="deck"]', '.hand', '/cards/back.svg'); send({ type: 'draw', from: 'deck' }); } else if (myTurn) say(step === 'skip' ? 'Choose a player to skip first' : 'You’ve already drawn — now play or discard'); else say('Wait for your turn'); };
@@ -273,7 +319,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				{rivals.map(r => {
 					const target = myTurn && step === 'skip' && view.skipTargets.includes(r.id);
 					return (
-						<div key={r.id} className={`rival${view.turn === r.id ? ' turn' : ''}${target ? ' target' : ''}`}
+						<div key={r.id} data-seat={r.id} className={`rival${view.turn === r.id ? ' turn' : ''}${target ? ' target' : ''}`}
 							role={target ? 'button' : undefined} tabIndex={target ? 0 : undefined} aria-label={target ? `Skip ${nameOf(r.id)}` : undefined}
 							onClick={() => tapRival(r)} onKeyDown={e => { if (e.key === 'Enter') tapRival(r); }}>
 							{r.skipped && <span className="badge pill orange">Skipped next</span>}
@@ -312,14 +358,14 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</div>
 				<div className="piles">
 					<div className="pilewrap">
-						<button type="button" data-drop="discard" className={`pile${!top ? ' empty' : ''}${myTurn && step === 'draw' && top && !isSkip(top) ? ' go' : ''}${canPlay && selected ? ' drop' : ''}`}
+						<button type="button" data-drop="discard" className={`pile${!top ? ' empty' : ''}${myTurn && step === 'draw' && top && !isSkip(top) ? ' go' : ''}${canPlay && selected ? ' drop' : ''}${tip?.pile === 'discard' ? ' hinted' : ''}`}
 							onClick={tapDiscard} aria-label={top ? `Discard pile, top card ${label(top)}` : 'Discard pile, empty'}>
 							{top && <img key={top} className="drop-in" src={cardSrc(top)} alt="" />}
 						</button>
 						<span className="pile-label">Discard</span>
 					</div>
 					<div className="pilewrap">
-						<button type="button" data-drop="deck" className={`pile${myTurn && step === 'draw' ? ' go' : ''}`} onClick={tapDeck} aria-label={`Deck, ${view.deckCount} cards`}>
+						<button type="button" data-drop="deck" className={`pile${myTurn && step === 'draw' ? ' go' : ''}${tip?.pile === 'deck' ? ' hinted' : ''}`} onClick={tapDeck} aria-label={`Deck, ${view.deckCount} cards`}>
 							<img src="/cards/back.svg" alt="" />
 							<span className="count">{view.deckCount}</span>
 						</button>
@@ -330,7 +376,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			</section>
 
 			{/* My groups */}
-			<section className="mine" aria-label={`Your phase ${mine.phase}`}>
+			<section className="mine" data-seat={me} aria-label={`Your phase ${mine.phase}`}>
 				<div className="mgroups">
 					{mine.conditions.map((c, g) => {
 						const cards = mine.groups?.[g] || [];
@@ -351,8 +397,12 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			<div className="actions">
 				{!mine.done && <button type="button" className="icon-btn gold" disabled={!canPlay || !allMet} onClick={() => send({ type: 'layDown' })}>Lay Down</button>}
 				{staged && <button type="button" className="icon-btn" onClick={() => send({ type: 'unstage' })}>Take Back</button>}
-				<button type="button" className="icon-btn" onClick={() => setSort(s => (s === 'number' ? 'colour' : s === 'colour' ? 'dealt' : 'number'))} aria-label={`Sort hand, now by ${sort}`}>
-					Sort: {sort === 'number' ? '1–12' : sort === 'colour' ? 'Colour' : 'As dealt'}
+				{tip?.arrange && canPlay && !mine.done && <button type="button" className="icon-btn gold" onClick={() => arrange(tip.arrange!)}>Arrange</button>}
+				{myTurn && !view.finished && data.status === 'playing' && (
+					<button type="button" className={`icon-btn${tip ? ' on' : ''}`} onClick={() => (tip ? setTip(null) : askHint())} aria-pressed={!!tip} aria-label="Hint: what should I do?">💡 Hint</button>
+				)}
+				<button type="button" className="icon-btn" onClick={() => setSort(sort === 'number' ? 'colour' : sort === 'colour' ? 'dealt' : 'number')} aria-label={`Sort hand, now by ${sort}`}>
+					⇅ {sort === 'number' ? '1–12' : sort === 'colour' ? 'Colour' : 'Dealt'}
 				</button>
 			</div>
 
@@ -361,7 +411,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				{hand.map(c => c === PENDING ? (
 					<span key={c} className="card pending" aria-label="Drawing a card…"><img src="/cards/back.svg" alt="" /></span>
 				) : (
-					<button key={c} type="button" data-card={c} className={`card${selected === c ? ' sel' : ''}${fresh.includes(c) ? ' arrive' : ''}`} aria-pressed={selected === c} aria-label={label(c)}
+					<button key={c} type="button" data-card={c} className={`card${selected === c ? ' sel' : ''}${fresh.includes(c) ? ' arrive' : ''}${tip?.keep.includes(c) ? ' hint-keep' : ''}${tip?.discard === c ? ' hint-drop' : ''}`} aria-pressed={selected === c} aria-label={label(c)}
 						onPointerDown={() => { haptic(6); setSelected(sel => (sel === c ? null : c)); }}
 						onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(sel => (sel === c ? null : c)); } }}>
 						<img src={cardSrc(c)} alt="" />
@@ -377,6 +427,9 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				<span className="me-info"><b>{names[me]?.username}</b> · Phase {mine.phase} · Round {view.round}</span>
 				<span>{mine.score} pts</span>
 				{data.status === 'playing' && (
+					<button type="button" onClick={() => setTrayOpen(o => !o)} aria-label="Send a reaction" aria-expanded={trayOpen} style={{ fontSize: 19, padding: '0 6px' }}>😊</button>
+				)}
+				{data.status === 'playing' && (
 					<button type="button" onClick={() => setMenuOpen(true)} aria-label="Table options: leave, remove a player, end game" style={{ fontSize: 22, letterSpacing: 1 }}>⋯</button>
 				)}
 				<button type="button" aria-pressed={sound} aria-label={sound ? 'Turn chime on. Tap to mute.' : 'Turn chime off. Tap to unmute.'}
@@ -388,7 +441,23 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</button>
 			</footer>
 
-			<TableChat gameId={id} me={me} people={names} chatLast={data.chatLast || 0} />
+			<TableChat gameId={id} me={me} people={names} chatLast={data.chatLast || 0} onEmoji={floatEmoji} />
+			{tip && (
+				<div className="hint-card" role="status">
+					<span className="hint-ico" aria-hidden="true">💡</span>
+					<span className="hint-msg">{tip.message}</span>
+					<button type="button" className="hint-x" onClick={() => setTip(null)} aria-label="Close hint">×</button>
+				</div>
+			)}
+			{trayOpen && (
+				<>
+					<div className="tray-backdrop" onClick={() => setTrayOpen(false)} />
+					<div className="react-tray" role="group" aria-label="Reactions">
+						{REACTIONS.map(e => <button key={e} type="button" onClick={() => react(e)} aria-label={`Send ${e}`}>{e}</button>)}
+					</div>
+				</>
+			)}
+			{floats.map(f => <span key={f.key} className="float-emoji" style={{ left: f.x, top: f.y }} aria-hidden="true">{f.emoji}</span>)}
 			<Bubbles items={bubbles} allTop={!!view.finished} />
 			{party && <Confetti big={party === 'win'} />}
 			{toast && <div className="toast" role="alert">{toast}</div>}
