@@ -77,7 +77,7 @@ Free-plan caveat: Supabase pauses a free project after about a week with no acti
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon / publishable key |
 
 4. **Deploy**. The app is served over HTTPS, so it can be installed as a PWA ("Add to Home Screen" / "Install").
-5. Optional: under **Settings → Functions**, set the region to match your Supabase region. This keeps database round-trips short.
+5. **Function region:** `vercel.json` pins the functions to `lhr1` (London), next to the Supabase project in `eu-west-2`. If you ever move the database to another region, change `regions` in `vercel.json` to the nearest Vercel region. The dashboard setting alone did not apply to new deployments.
 
 ## 5. Check after deploying
 - [ ] Sign in with an existing account.
