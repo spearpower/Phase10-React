@@ -8,6 +8,7 @@ import type { Action, GameView, PlayerView } from '@/lib/engine';
 import { initSound, playSound, playTurnSound, setSoundOn, soundOn } from '@/lib/sound';
 import { Bubbles, Confetti, Crown, type Bubble, type BubbleKind } from '@/components/Celebrate';
 import TableChat from '@/components/TableChat';
+import TableMenu from '@/components/TableMenu';
 
 // Pure helpers (no node 'crypto' import on the client)
 const isWild = (c: string) => c[1] === 'w';
@@ -36,6 +37,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const [sound, setSound] = useState(true);
 	useEffect(() => { initSound(); setSound(soundOn()); }, []);
 	const [bubbles, setBubbles] = useState<Bubble[]>([]);
+	const [menuOpen, setMenuOpen] = useState(false);
 	const [party, setParty] = useState<null | 'round' | 'win'>(null);
 	const bubbleSeq = useRef(0);
 	const prevView = useRef<GameView | null>(null);
@@ -100,6 +102,10 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				bubble(pid === me ? `You completed Phase ${done[2]}!` : `${who(pid)} completed Phase ${done[2]}!`, 'phase', 3200);
 				playSound('phase');
 			}
+			const gone = /^\{(\d+)\} left the game · (.+)$/.exec(line);
+			if (gone) { bubble(`${who(Number(gone[1]))} left the game · ${gone[2]}`, 'skip', 3500); playSound('skip'); }
+			const out = /^\{(\d+)\} was removed by \{(\d+)\} · (.+)$/.exec(line);
+			if (out) { bubble(`${who(Number(out[2]))} removed ${who(Number(out[1]))} · ${out[3]}`, 'skip', 3500); playSound('skip'); }
 			const sk = /^\{(\d+)\} skipped \{(\d+)\}$/.exec(line);
 			if (sk) {
 				const by = Number(sk[1]), target = Number(sk[2]);
@@ -168,6 +174,28 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		});
 	}, [id, me, accept, refresh]);
 
+	if (data?.myLeft) {
+		const byMe = data.myLeft.by === data.me;
+		return (
+			<div className="app centered"><main className="center">
+				<div className="brand"><img src="/icons/icon-192.png" alt="" /><h1 className="large-title">{byMe ? 'You left this game' : 'You were removed'}</h1></div>
+				<p className="subtitle">{byMe ? `Reason: ${data.myLeft.reason || '—'}` : `${data.myLeft.byName || 'The host'} removed you from game ${data.id}. Reason: ${data.myLeft.reason || '—'}`}</p>
+				<Link className="btn btn-primary" href="/">Back to Play</Link>
+			</main></div>
+		);
+	}
+	if (data && !view && data.canManage && data.status === 'playing') {
+		return (
+			<div className="app"><main>
+				<h1 className="large-title">Game {data.id}</h1>
+				<p className="subtitle">You’re not playing at this table. As a super admin you can remove players or end the game.</p>
+				<button className="btn btn-primary" type="button" onClick={() => setMenuOpen(true)}>Table Options</button>
+				<Link className="btn btn-plain" href="/">Back to Play</Link>
+				{menuOpen && <TableMenu gameId={id} me={me} canManage players={data.players} inGame={false} onClose={() => setMenuOpen(false)}
+					onDone={() => { setMenuOpen(false); refresh(); }} />}
+			</main></div>
+		);
+	}
 	if (!data || !view) {
 		return (
 			<div className="board" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
@@ -189,6 +217,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	// ----- hint text -----
 	let hint = '', hintKind = 'wait';
 	if (view.finished) { hint = 'Game over'; }
+	else if (data.status === 'ended') { hint = 'Game ended'; }
 	else if (myTurn && step === 'draw') { hint = 'Your turn · Draw a card'; hintKind = 'me'; }
 	else if (myTurn && step === 'skip') { hint = 'Tap a player to skip'; hintKind = 'skip'; }
 	else if (myTurn) {
@@ -347,6 +376,9 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</Link>
 				<span className="me-info"><b>{names[me]?.username}</b> · Phase {mine.phase} · Round {view.round}</span>
 				<span>{mine.score} pts</span>
+				{data.status === 'playing' && (
+					<button type="button" onClick={() => setMenuOpen(true)} aria-label="Table options: leave, remove a player, end game" style={{ fontSize: 22, letterSpacing: 1 }}>⋯</button>
+				)}
 				<button type="button" aria-pressed={sound} aria-label={sound ? 'Turn chime on. Tap to mute.' : 'Turn chime off. Tap to unmute.'}
 					onClick={() => { const on = !sound; setSound(on); setSoundOn(on); }}>
 					<svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 20, height: 20, strokeWidth: 2 }}>
@@ -362,6 +394,12 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			{toast && <div className="toast" role="alert">{toast}</div>}
 			{showRound && view.lastRound && <RoundSheet view={view} nameOf={nameOf} onClose={() => setSeenRound(view.lastRound!.round)} />}
 			{view.finished && <FinishedSheet data={data} view={view} nameOf={nameOf} />}
+			{data.status === 'ended' && !view.finished && <EndedSheet data={data} nameOf={nameOf} />}
+			{menuOpen && (
+				<TableMenu gameId={id} me={me} canManage={!!data.canManage} players={data.players.filter(p => view.order.includes(p.id))} inGame
+					onClose={() => setMenuOpen(false)}
+					onDone={what => { setMenuOpen(false); if (what === 'left') router.replace('/'); else refresh(); }} />
+			)}
 		</div>
 	);
 }
@@ -541,4 +579,32 @@ function newLogLines(before: string[], after: string[]): string[] {
 		if (k > 0 && after.slice(i, i + k).every((x, j) => x === before[j])) return after.slice(0, i);
 	}
 	return after;
+}
+
+function EndedSheet({ data, nameOf }: { data: GameData; nameOf: (id: number) => string }) {
+	const router = useRouter();
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState('');
+	const by = data.ended?.by;
+	return (
+		<div className="sheet-backdrop">
+			<div className="sheet" role="dialog" aria-modal="true" aria-label="Game ended">
+				<div className="grabber" />
+				<h2>Game ended</h2>
+				<p className="subtitle center">{by ? `${by === data.me ? 'You' : data.ended?.byName || nameOf(by)} ended the game.` : 'The game ended.'} Reason: <b>{data.ended?.reason || '—'}</b><br />No leaderboard points were given.</p>
+				<div style={{ marginTop: 16 }}>
+					{data.me === data.hostId && (
+						<button className="btn btn-primary" type="button" disabled={busy} onClick={async () => {
+							setBusy(true);
+							try { const { id } = await api<{ id: number }>(`/api/games/${data.id}/again`, {}); router.push(`/lobby/${id}`); }
+							catch (e) { setError((e as Error).message); setBusy(false); }
+						}}>Play Again</button>
+					)}
+					{data.me !== data.hostId && data.nextGameId && <Link className="btn btn-primary" href={`/lobby/${data.nextGameId}`}>Join the Next Game</Link>}
+					<Link className="btn btn-plain" href="/">Back to Play</Link>
+					{error && <div className="error-banner">{error}</div>}
+				</div>
+			</div>
+		</div>
+	);
 }

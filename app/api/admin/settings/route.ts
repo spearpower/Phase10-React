@@ -4,7 +4,7 @@ import { getAccount } from '@/lib/users';
 
 // Admin rights are checked against the database (not the cookie), so a role change applies at once.
 async function isAdmin(id: number) {
-	try { return (await getAccount(id)).role === 'admin'; } catch { return false; }
+	try { const r = (await getAccount(id)).role as string; return r === 'admin' || r === 'superadmin'; } catch { return false; }
 }
 
 export const GET = withUser(async user => {

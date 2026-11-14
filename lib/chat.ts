@@ -10,7 +10,7 @@ const MIN_GAP_MS = 700;          // per player: stops accidental double sends an
 const lastSent = new Map<string, number>();
 
 async function assertMember(gameId: number, userId: number) {
-	const [m] = await sql`select 1 from game_players where game_id = ${gameId} and user_id = ${userId}`;
+	const [m] = await sql`select 1 from game_players where game_id = ${gameId} and user_id = ${userId} and left_at is null`;
 	if (!m) throw new GameError('Only players at this table can chat', 403);
 }
 

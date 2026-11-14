@@ -4,7 +4,7 @@ import { GameError } from './engine';
 import { Session } from './session';
 import { AVATARS, isAvatar } from './avatars';
 
-interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin'; status: string; ok: boolean; is_bot?: boolean }
+interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin'; status: string; ok: boolean; is_bot?: boolean }
 
 export async function signIn(username: string, password: string): Promise<Session> {
 	const u = (username || '').trim();
@@ -46,7 +46,7 @@ export async function signUp(input: Partial<SignUpInput>): Promise<Session> {
 
 // ---------- Account ----------
 
-export interface Account { id: number; username: string; fullname: string; email: string | null; phone: string | null; photo: string; role: 'player' | 'admin' }
+export interface Account { id: number; username: string; fullname: string; email: string | null; phone: string | null; photo: string; role: 'player' | 'admin' | 'superadmin' }
 
 export async function getAccount(id: number): Promise<Account> {
 	const [row] = await sql<Account[]>`select id, username, fullname, email, phone, photo, role from users where id = ${id} and not is_bot`;

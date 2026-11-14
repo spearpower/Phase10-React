@@ -531,3 +531,15 @@ a.profile .chev{margin-left:auto}
 	.chat-fab{top:auto;right:auto;left:calc(var(--safe-l) + 8px);bottom:calc(var(--safe-b) + 46px);width:44px;height:44px}
 	.chat-preview{top:auto;right:auto;left:calc(var(--safe-l) + 60px);bottom:calc(var(--safe-b) + 50px);border-radius:18px 18px 18px 4px}
 }
+
+/* Table options / reasons */
+.opt-ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--tint);font-size:18px;flex:0 0 auto}
+.danger-text{color:var(--danger)}
+.reason-list{display:flex;flex-wrap:wrap;gap:8px}
+.reason-list label{position:relative;display:block}
+.reason-list input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.reason-list span{display:inline-flex;align-items:center;min-height:var(--tap);padding:0 16px;border-radius:999px;background:var(--tint);font-weight:600;font-size:15px}
+.reason-list label.on span{background:var(--gold);color:var(--ink)}
+.reason-list input:focus-visible + span{outline:3px solid var(--gold);outline-offset:2px}
+.btn-danger-solid{color:#fff;background:#C0392B}
+.btn-danger-solid:active{background:#A93226}

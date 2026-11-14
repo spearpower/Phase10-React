@@ -21,11 +21,14 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 	return data as T;
 }
 
-export interface LobbyPlayer { id: number; seat: number; username: string; photo: string; online: boolean; isBot?: boolean }
+export interface LobbyPlayer { id: number; seat: number; username: string; photo: string; online: boolean; isBot?: boolean; left?: boolean }
 export interface GameData {
-	id: number; me: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned'; hostId: number; isMember: boolean;
+	id: number; me: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned' | 'ended'; hostId: number; isMember: boolean;
 	pin: string | null; private: boolean; timerSec: number; version: number; deadline: string | null;
 	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; practice?: boolean; chatLast?: number;
+	canManage?: boolean; superAdmin?: boolean;
+	myLeft?: { by: number | null; byName?: string | null; reason: string | null } | null;
+	ended?: { by: number | null; byName?: string | null; reason: string } | null;
 }
 
 const RT_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;

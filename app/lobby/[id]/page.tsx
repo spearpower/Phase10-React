@@ -68,7 +68,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 								<span className="sub">{p.isBot ? <span className="vf-badge">Virtual Friend</span> : <>{p.id === data.hostId ? 'Host' : 'Player'} · {p.online ? 'Here' : 'Away'}</>}</span>
 							</span>
 							<span className={`dot${p.online ? ' on' : ''}`} aria-hidden="true" />
-							{isHost && p.id !== myId && (
+							{(isHost || data.canManage) && p.id !== myId && (
 								<button className="icon-btn danger" type="button" disabled={busy} aria-label={`Remove ${p.username}`}
 									onClick={() => act(() => api(`/api/games/${id}/kick`, { userId: p.id }))}>Remove</button>
 							)}

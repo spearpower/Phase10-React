@@ -2,7 +2,7 @@
 // with the game row locked (SELECT ... FOR UPDATE), so simultaneous moves can't interleave.
 import type postgres from 'postgres';
 import { sql } from './db';
-import { Action, apply, autoPlay, GameError, GameState, GameView, newGame, viewFor } from './engine';
+import { Action, apply, autoPlay, GameError, GameState, GameView, newGame, removePlayer, viewFor } from './engine';
 import { Condition } from './rules';
 import { botTurn } from './bot';
 import { getSettings } from './settings';
@@ -38,6 +38,14 @@ interface GameRow {
 	id: number; host_id: number; edition: number; pin: string | null; timer_sec: number; status: string;
 	round: number; version: number; state: GameState | null; turn_user_id: number | null;
 	turn_deadline: Date | null; next_game_id: number | null;
+	end_reason?: string | null; ended_by?: number | null;
+}
+
+/** Display name for someone who may not be sitting at the table (e.g. a super admin). */
+async function nameOfUser(id: number | null | undefined): Promise<string | null> {
+	if (!id) return null;
+	const [u] = await sql<{ username: string }[]>`select username from users where id = ${id}`;
+	return u?.username ?? null;
 }
 
 // ---------- Lobby ----------
@@ -79,7 +87,7 @@ export async function listMyGames(user: Session) {
 		       (select count(*)::int from game_players p where p.game_id = g.id) as players,
 		       (g.turn_user_id = ${user.id}) as my_turn
 		from games g
-		join game_players me on me.game_id = g.id and me.user_id = ${user.id}
+		join game_players me on me.game_id = g.id and me.user_id = ${user.id} and me.left_at is null
 		join users h on h.id = g.host_id
 		where g.status = 'playing'
 		order by g.updated_at desc
@@ -104,31 +112,96 @@ export async function joinGame(user: Session, gameId: number, pin: string | null
 	return result;
 }
 
-export async function leaveGame(user: Session, gameId: number): Promise<void> {
+/** Shortest sensible reason text: no control characters, max 80 characters. */
+export function cleanReason(raw: unknown): string {
+	return Array.from(String(raw ?? '').replace(/[\u0000-\u001F\u007F]/g, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('');
+}
+
+async function roleOf(tx: Tx, userId: number): Promise<string> {
+	const [u] = await tx<{ role: string }[]>`select role from users where id = ${userId}`;
+	return u?.role || 'player';
+}
+
+/** Host of the table, or a super admin (any table). */
+async function canManage(tx: Tx, g: GameRow, userId: number): Promise<boolean> {
+	return g.host_id === userId || (await roleOf(tx, userId)) === 'superadmin';
+}
+
+/** Leave a table. In the waiting room no reason is needed; during a game a reason is required. */
+export async function leaveGame(user: Session, gameId: number, reasonRaw?: unknown): Promise<void> {
+	const reason = cleanReason(reasonRaw);
 	await sql.begin(async tx => {
 		const g = await lock(tx, gameId);
-		if (g.status !== 'lobby') throw new GameError('You can only leave before the game starts. Your game is saved; rejoin from Continue.', 409);
-		if (g.host_id === user.id) {
-			await tx`update games set status = 'abandoned' where id = ${gameId}`;
-		} else {
-			await tx`delete from game_players where game_id = ${gameId} and user_id = ${user.id}`;
+		if (g.status === 'lobby') {
+			if (g.host_id === user.id) await tx`update games set status = 'abandoned' where id = ${gameId}`;
+			else await tx`delete from game_players where game_id = ${gameId} and user_id = ${user.id}`;
+			await bump(tx, gameId);
+			return;
 		}
-		await bump(tx, gameId);
+		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played', 409);
+		if (!reason) throw new GameError('Choose a reason for leaving');
+		await takeOut(tx, g, user.id, user.id, reason, `left the game · ${reason}`);
 	});
 	await ping(gameId);
 	await notifyLobbyList();
 }
 
-export async function kickPlayer(user: Session, gameId: number, target: number): Promise<void> {
+/** Remove a player: the host, or a super admin. Works in the waiting room and during a game. */
+export async function kickPlayer(user: Session, gameId: number, target: number, reasonRaw?: unknown): Promise<void> {
+	const reason = cleanReason(reasonRaw);
 	await sql.begin(async tx => {
 		const g = await lock(tx, gameId);
-		if (g.host_id !== user.id) throw new GameError('Only the host can remove players', 403);
-		if (g.status !== 'lobby') throw new GameError('The game has already started', 409);
-		if (target === user.id) throw new GameError('You can’t remove yourself');
-		await tx`delete from game_players where game_id = ${gameId} and user_id = ${target}`;
-		await bump(tx, gameId);
+		if (!(await canManage(tx, g, user.id))) throw new GameError('Only the host or a super admin can remove players', 403);
+		if (target === user.id) throw new GameError('To go yourself, use Leave game');
+		if (g.status === 'lobby') {
+			await tx`delete from game_players where game_id = ${gameId} and user_id = ${target}`;
+			await bump(tx, gameId);
+			return;
+		}
+		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played', 409);
+		if (!reason) throw new GameError('Choose a reason for removing them');
+		await takeOut(tx, g, target, user.id, reason, `was removed by {${user.id}} · ${reason}`);
 	});
 	await ping(gameId);
+}
+
+/** End a game early (host or super admin). No leaderboard points are given. */
+export async function endGame(user: Session, gameId: number, reasonRaw: unknown): Promise<void> {
+	const reason = cleanReason(reasonRaw);
+	if (!reason) throw new GameError('Choose a reason for ending the game');
+	await sql.begin(async tx => {
+		const g = await lock(tx, gameId);
+		if (!(await canManage(tx, g, user.id))) throw new GameError('Only the host or a super admin can end the game', 403);
+		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played', 409);
+		await finishEarly(tx, g, g.state, user.id, reason);
+	});
+	await ping(gameId);
+	await notifyLobbyList();
+}
+
+/** Take one player out of a running game; end it if fewer than 2 players (or no people) remain. */
+async function takeOut(tx: Tx, g: GameRow, target: number, by: number, reason: string, note: string) {
+	const state = g.state!;
+	if (!state.players[String(target)]) throw new GameError('That player is not in this game', 404);
+	const before = state.round;
+	const left = removePlayer(state, target, note);
+	await tx`update game_players set left_at = now(), left_reason = ${reason}, left_by = ${by} where game_id = ${g.id} and user_id = ${target}`;
+	const people = state.order.filter(id => !state.bots?.includes(id)).length;
+	if (left < 2 || people === 0) {
+		await finishEarly(tx, g, state, null, left < 2 ? 'Not enough players left' : 'Only Virtual Friends were left');
+		return;
+	}
+	await save(tx, g, state, state.round !== before);
+}
+
+async function finishEarly(tx: Tx, g: GameRow, state: GameState, by: number | null, reason: string) {
+	state.turn = null;
+	state.log.unshift(by ? `Game ended by {${by}} · ${reason}` : `Game ended · ${reason}`);
+	state.log.length = Math.min(state.log.length, 6);
+	await tx`
+		update games set state = ${tx.json(state as never)}, status = 'ended', end_reason = ${reason}, ended_by = ${by},
+			turn_user_id = null, turn_deadline = null, finished_at = now(), version = version + 1
+		where id = ${g.id}`;
 }
 
 export async function startGame(user: Session, gameId: number, timerSec: number): Promise<void> {
@@ -154,7 +227,7 @@ export async function playAgain(user: Session, gameId: number): Promise<number> 
 	const newId = await sql.begin(async tx => {
 		const g = await lock(tx, gameId);
 		if (g.host_id !== user.id) throw new GameError('Only the host can start a new game', 403);
-		if (g.status !== 'finished') throw new GameError('This game hasn’t finished yet', 409);
+		if (g.status !== 'finished' && g.status !== 'ended') throw new GameError('This game hasn’t finished yet', 409);
 		if (g.next_game_id) return g.next_game_id;
 		await tx`update games set status = 'abandoned' where host_id = ${user.id} and status = 'lobby'`;
 		const [ng] = await tx<{ id: number }[]>`
@@ -225,6 +298,7 @@ export interface MoveResult {
 export async function move(user: Session, gameId: number, action: Action): Promise<MoveResult> {
 	return sql.begin(async tx => {
 		const g = await lockAsMember(tx, gameId, user.id);
+		if (g.status === 'ended') throw new GameError('This game was ended', 409);
 		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played right now', 409);
 		const state = g.state;
 		const before = state.round;
@@ -275,13 +349,15 @@ export async function getGame(user: Session, gameId: number) {
 		}
 	}
 
-	const players = await sql<{ user_id: number; seat: number; username: string; photo: string; online: boolean; is_bot: boolean }[]>`
-		select p.user_id, p.seat, u.username, u.photo, u.is_bot,
+	const players = await sql<{ user_id: number; seat: number; username: string; photo: string; online: boolean; is_bot: boolean; left_at: Date | null; left_reason: string | null; left_by: number | null; role: string }[]>`
+		select p.user_id, p.seat, u.username, u.photo, u.is_bot, p.left_at, p.left_reason, p.left_by, u.role,
 		       (u.is_bot or p.last_seen > now() - make_interval(secs => ${ONLINE_SECONDS})) as online
 		from game_players p join users u on u.id = p.user_id
 		where p.game_id = ${gameId} order by p.seat`;
-	const isMember = players.some(p => p.user_id === user.id);
-	if (!isMember && g.status !== 'lobby') throw new GameError('You are not in this game', 403);
+	const meRow = players.find(p => p.user_id === user.id);
+	const isMember = !!meRow && !meRow.left_at;
+	const [{ role: myRole } = { role: 'player' }] = await sql<{ role: string }[]>`select role from users where id = ${user.id}`;
+	if (!meRow && g.status !== 'lobby' && myRole !== 'superadmin') throw new GameError('You are not in this game', 403);
 
 	const view: GameView | null = g.state && isMember ? viewFor(g.state, user.id) : null;
 	return {
@@ -298,7 +374,11 @@ export async function getGame(user: Session, gameId: number) {
 		serverNow: new Date().toISOString(),
 		nextGameId: g.next_game_id,
 		chatLast: isMember ? g.chat_last ?? 0 : 0,
-		players: players.map(p => ({ id: p.user_id, seat: p.seat, username: p.username, photo: p.photo, online: p.online, isBot: p.is_bot })),
+		players: players.map(p => ({ id: p.user_id, seat: p.seat, username: p.username, photo: p.photo, online: p.online, isBot: p.is_bot, left: !!p.left_at })),
+		canManage: g.host_id === user.id || myRole === 'superadmin',
+		superAdmin: myRole === 'superadmin',
+		myLeft: meRow?.left_at ? { by: meRow.left_by, byName: await nameOfUser(meRow.left_by), reason: meRow.left_reason } : null,
+		ended: g.status === 'ended' ? { by: g.ended_by ?? null, byName: await nameOfUser(g.ended_by ?? null), reason: g.end_reason ?? '' } : null,
 		practice: !!g.state?.bots?.length,
 		view,
 	};
@@ -326,7 +406,7 @@ async function lock(tx: Tx, gameId: number): Promise<GameRow> {
 
 async function lockAsMember(tx: Tx, gameId: number, userId: number): Promise<GameRow> {
 	const [g] = await tx<(GameRow & { is_member: boolean })[]>`
-		select g.*, exists(select 1 from game_players p where p.game_id = g.id and p.user_id = ${userId}) as is_member
+		select g.*, exists(select 1 from game_players p where p.game_id = g.id and p.user_id = ${userId} and p.left_at is null) as is_member
 		from games g where g.id = ${gameId} for update`;
 	if (!g) throw new GameError('Game not found', 404);
 	if (!g.is_member) throw new GameError('You are not in this game', 403);

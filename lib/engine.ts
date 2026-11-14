@@ -246,6 +246,25 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 	}
 }
 
+/**
+ * Take a player out of a game in progress (they left, or the host / a super admin removed them).
+ * Their cards (hand and any laid-down groups) are shuffled back into the deck, so all 108 stay in play.
+ * If it was their turn, play moves to the next player. Returns how many players are left.
+ */
+export function removePlayer(s: GameState, id: number, note: string): number {
+	const p = s.players[String(id)];
+	if (!p) throw new GameError('That player is not in this game', 404);
+	const next = s.order.length > 1 ? nextAfter(s, id) : null;
+	s.deck = shuffle([...s.deck, ...p.hand, ...p.groups.flat()]);
+	delete s.players[String(id)];
+	s.order = s.order.filter(x => x !== id);
+	if (s.bots) s.bots = s.bots.filter(x => x !== id);
+	log(s, `${who(id)} ${note}`);
+	if (s.order.length >= 2 && s.turn === id && next !== null) beginTurn(s, next);
+	if (s.order.length < 2) s.turn = null;
+	return s.order.length;
+}
+
 export function skipTargets(s: GameState, me: number): number[] {
 	return s.order.filter(id => id !== me && !s.players[String(id)].skipped);
 }

@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify } from 'jose';
 export const COOKIE = 'sofi10_session';
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-export interface Session { id: number; username: string; photo: string; role: 'player' | 'admin' }
+export interface Session { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin' }
 
 function key() {
 	const secret = process.env.SESSION_SECRET;
@@ -28,7 +28,7 @@ export async function readSession(token: string | undefined): Promise<Session | 
 	if (!token) return null;
 	try {
 		const { payload } = await jwtVerify(token, key(), { algorithms: ['HS256'] });
-		return { id: Number(payload.sub), username: String(payload.u), photo: String(payload.p), role: payload.r === 'admin' ? 'admin' : 'player' };
+		return { id: Number(payload.sub), username: String(payload.u), photo: String(payload.p), role: payload.r === 'superadmin' ? 'superadmin' : payload.r === 'admin' ? 'admin' : 'player' };
 	} catch {
 		return null;
 	}

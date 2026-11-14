@@ -6,7 +6,7 @@ import { AVATARS, avatarUrl } from '@/lib/avatars';
 import { soundOn, setSoundOn, initSound } from '@/lib/sound';
 import { ErrorBanner, NavBar, Skeleton, TabBar, Chevron } from '@/components/ui';
 
-interface Account { id: number; username: string; fullname: string; email: string | null; phone: string | null; photo: string; role: 'player' | 'admin' }
+interface Account { id: number; username: string; fullname: string; email: string | null; phone: string | null; photo: string; role: 'player' | 'admin' | 'superadmin' }
 
 export default function AccountPage() {
 	const [acc, setAcc] = useState<Account | null>(null);
@@ -119,7 +119,7 @@ export default function AccountPage() {
 					<ErrorBanner>{pwError}</ErrorBanner>
 				</form>
 
-				{acc.role === 'admin' && (
+				{(acc.role === 'admin' || acc.role === 'superadmin') && (
 					<>
 						<div className="section-title">Admin</div>
 						<nav className="group">

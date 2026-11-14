@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isRunInOrder, isValidGroup, placeInGroup, meetsCondition, Condition } from './rules';
-import { apply, autoPlay, countCards, GameError, GameState, newGame, viewFor } from './engine';
+import { apply, autoPlay, countCards, GameError, GameState, newGame, removePlayer, viewFor } from './engine';
 import { penalty } from './cards';
 
 const CLASSIC: Record<string, Condition[]> = {
@@ -127,6 +127,22 @@ describe('engine', () => {
 		}
 		expect(JSON.stringify(v)).not.toContain(JSON.stringify(s.players['2'].hand));
 		expect((v as unknown as Record<string, unknown>).deck).toBeUndefined();
+	});
+
+	it('removing a player keeps all 108 cards and passes their turn on', () => {
+		const s = newGame(1, [1, 2, 3], CLASSIC);
+		const leaving = s.turn!;
+		const next = s.order[(s.order.indexOf(leaving) + 1) % 3];
+		const lp = s.players[String(leaving)];
+		lp.groups[0] = [lp.hand.shift()!]; // one card laid down, still theirs
+		expect(removePlayer(s, leaving, 'left the game')).toBe(2);
+		expect(s.order).not.toContain(leaving);
+		expect(s.turn).toBe(next);
+		expect(s.step).toBe('draw');
+		expect(countCards(s)).toBe(108);
+		expect(s.log[0]).toContain('left the game');
+		expect(removePlayer(s, s.order[0], 'was removed')).toBe(1);
+		expect(s.turn).toBeNull();
 	});
 
 	it('timeout auto-plays a legal turn', () => {
