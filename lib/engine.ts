@@ -382,11 +382,18 @@ export function viewFor(s: GameState, me: number): GameView {
 		order: s.order,
 		players: s.order.map(id => {
 			const p = s.players[String(id)];
+			// At the end of the game a player who laid down has already moved up a phase, but their
+			// groups still belong to the phase they completed: show those groups under that phase.
+			let conditions = conditionsFor(s, p);
+			if (p.done && p.groups.length !== conditions.length && (s.phases[String(p.phase - 1)] || []).length === p.groups.length) {
+				conditions = s.phases[String(p.phase - 1)];
+			}
+			const groups = conditions.map((_, i) => p.groups[i] || []);
 			return {
 				id, phase: p.phase, done: p.done, skipped: p.skipped, score: p.score,
 				handCount: p.hand.length + (id !== me && !p.done ? p.groups.flat().length : 0),
-				groups: id === me || p.done ? p.groups : null,
-				conditions: conditionsFor(s, p),
+				groups: id === me || p.done ? groups : null,
+				conditions,
 			};
 		}),
 		deckCount: s.deck.length,

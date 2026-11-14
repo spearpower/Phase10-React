@@ -167,7 +167,20 @@ describe('engine', () => {
 		expect(countCards(s)).toBe(108);
 	});
 
-	it('timeout auto-plays a legal turn', () => {
+	it('finished game: a player who moved up a phase still gets groups matching their conditions (live game 1013)', () => {
+		const s = newGame(1, [1, 2], CLASSIC);
+		// player 2 completed phase 6 (one run) in the last round and moved up to phase 7 (two sets)
+		const p = s.players['2'];
+		p.phase = 7; p.done = true; p.groups = [['1r1', '1b2', '1g3', '1y4', '2r5', '2b6', '2g7', '2y8', '1r9']];
+		s.finished = { standings: [] };
+		for (const me of [1, 2]) {
+			const v = viewFor(s, me).players.find(x => x.id === 2)!;
+			expect(v.groups!.length).toBe(v.conditions.length);
+			expect(v.conditions).toEqual(CLASSIC['6']);
+		}
+	});
+
+		it('timeout auto-plays a legal turn', () => {
 		const s = newGame(1, [1, 2, 3], CLASSIC);
 		const before = s.turn;
 		autoPlay(s);

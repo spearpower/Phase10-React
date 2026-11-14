@@ -339,7 +339,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 										<button key={g} type="button" data-drop={`r${r.id}-${g}`} className={`rgroup${selected && canPlay && mine.done ? ' can-drop' : ''}`}
 											onClick={e => { e.stopPropagation(); tapRivalGroup(r, g); }} aria-label={`${nameOf(r.id)}: ${conditionLabel(c)}`}>
 											<span className="lbl">{conditionLabel(c)}</span>
-											<Minis cards={r.groups![g]} />
+											<Minis cards={r.groups?.[g] || []} />
 										</button>
 									))}
 								</div>
@@ -473,8 +473,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	);
 }
 
-function Minis({ cards }: { cards: string[] }) {
-	return <>{cards.map((c, i) => <img key={c + i} className="mini" src={cardSrc(c)} alt={label(c)} />)}</>;
+function Minis({ cards }: { cards?: string[] }) {
+	return <>{(cards || []).map((c, i) => <img key={c + i} className="mini" src={cardSrc(c)} alt={label(c)} />)}</>;
 }
 
 function RoundSheet({ view, nameOf, onClose }: { view: GameView; nameOf: (id: number) => string; onClose: () => void }) {
