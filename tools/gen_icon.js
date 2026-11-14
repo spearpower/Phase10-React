@@ -1,5 +1,5 @@
 // Usage: node tools/gen_icon.js public/icons/icon.svg  (then render PNGs 512/192/180)
-// Original Sofi10 app icon as SVG (full-bleed so it also works as a maskable icon).
+// Original Rummy10 app icon as SVG (full-bleed so it also works as a maskable icon).
 const fs = require('fs');
 const out = process.argv[2];
 const FONT = `ui-rounded,'SF Pro Rounded','Arial Rounded MT Bold','Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
@@ -15,7 +15,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width
 <rect width="512" height="512" fill="url(#f)"/>
 ${card(186, 262, -14, '#2457C5', '1')}
 ${card(326, 262, 14, '#D7263D', '0')}
-<text x="256" y="452" text-anchor="middle" font-family="${FONT}" font-weight="900" font-size="58" fill="#F2C14E" letter-spacing="4">SOFI</text>
+<text x="256" y="452" text-anchor="middle" font-family="${FONT}" font-weight="900" font-size="58" fill="#F2C14E" letter-spacing="3">RUMMY</text>
 </svg>`;
 fs.writeFileSync(out, svg);
 console.log('icon written');

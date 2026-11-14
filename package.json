@@ -1,8 +1,8 @@
 {
-  "name": "sofi10-web",
+  "name": "rummy10-web",
   "version": "3.0.0",
   "private": true,
-  "description": "Sofi10 — real-time phase card game (Next.js on Vercel + Postgres/Supabase)",
+  "description": "Rummy10 — real-time phase card game (Next.js on Vercel + Postgres/Supabase)",
   "scripts": {
     "dev": "next dev -p 3010",
     "build": "next build",

@@ -1,5 +1,5 @@
 // Usage: node tools/gen_cards.js public/imgs/cards/s10
-// Generates the original Sofi10 card set as SVG (viewBox 143x194, same ratio as the old PNGs).
+// Generates the original Rummy10 card set as SVG (viewBox 143x194, same ratio as the old PNGs).
 // Each colour also has its own shape so colour is never the only cue (HIG accessibility).
 const fs = require('fs');
 const path = require('path');
@@ -80,8 +80,8 @@ function back() {
 <g clip-path="url(#c)">${lines}</g>
 <rect x="9" y="9" width="${W - 18}" height="${H - 18}" rx="${R - 6}" fill="none" stroke="#F2C14E" stroke-width="2.5"/>
 <circle cx="${W / 2}" cy="${H / 2}" r="38" fill="#F2C14E"/>
-<text x="${W / 2}" y="${H / 2 + 3}" text-anchor="middle" font-family="${FONT}" font-weight="900" font-size="34" fill="#0B4A30">S10</text>
-<text x="${W / 2}" y="${H / 2 + 20}" text-anchor="middle" font-family="${FONT}" font-weight="700" font-size="9" fill="#0B4A30" letter-spacing="2">SOFI</text>`;
+<text x="${W / 2}" y="${H / 2 + 3}" text-anchor="middle" font-family="${FONT}" font-weight="900" font-size="34" fill="#0B4A30">R10</text>
+<text x="${W / 2}" y="${H / 2 + 20}" text-anchor="middle" font-family="${FONT}" font-weight="700" font-size="9" fill="#0B4A30" letter-spacing="1.5">RUMMY</text>`;
   return frame(inner, '#0E5A3A');
 }
 

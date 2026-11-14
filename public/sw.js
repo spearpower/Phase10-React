@@ -1,10 +1,10 @@
-/* Sofi10 service worker (Next.js build).
+/* Rummy10 service worker (Next.js build).
  * - Cache-first for hashed build files (/_next/static) and the card/avatar/icon art.
  * - Never caches pages or /api: they carry the signed-in player and live game state.
  * - Navigations fall back to /offline.html when the network is down.
  * Bump VERSION when the precached files change.
  */
-const VERSION = 'sofi10-v3.0.0';
+const VERSION = 'rummy10-v3.1.0';
 const STATIC_CACHE = VERSION + '-static';
 
 const CARDS = [];
@@ -20,7 +20,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
 	event.waitUntil(
 		caches.keys()
-			.then(keys => Promise.all(keys.filter(k => k.startsWith('sofi10-') && k !== STATIC_CACHE).map(k => caches.delete(k))))
+			.then(keys => Promise.all(keys.filter(k => (k.startsWith('rummy10-') || k.startsWith('sofi10-')) && k !== STATIC_CACHE).map(k => caches.delete(k))))
 			.then(() => self.clients.claim())
 	);
 });

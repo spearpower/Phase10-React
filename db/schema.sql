@@ -1,5 +1,5 @@
 -- =====================================================================
--- Sofi10 database schema — PostgreSQL 15+ / Supabase
+-- Rummy10 database schema — PostgreSQL 15+ / Supabase
 -- Safe to run on a blank database. Contains no personal data.
 -- Design notes:
 --   * One row per game in `games`; the live round lives in games.state (jsonb)

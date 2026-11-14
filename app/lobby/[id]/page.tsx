@@ -37,9 +37,9 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 
 	const invite = async () => {
 		const url = `${location.origin}/lobby/${id}`;
-		const text = `Join my Sofi10 table — game ${id}${data.pin ? `, PIN ${data.pin}` : ''}`;
+		const text = `Join my Rummy10 table — game ${id}${data.pin ? `, PIN ${data.pin}` : ''}`;
 		try {
-			if (navigator.share) await navigator.share({ title: 'Sofi10', text, url });
+			if (navigator.share) await navigator.share({ title: 'Rummy10', text, url });
 			else { await navigator.clipboard.writeText(`${text}: ${url}`); setCopied(true); setTimeout(() => setCopied(false), 2500); }
 		} catch { /* share cancelled */ }
 	};

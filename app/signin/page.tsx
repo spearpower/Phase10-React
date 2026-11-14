@@ -27,7 +27,7 @@ export default function SignInPage() {
 			<main>
 				<div className="brand">
 					<img src="/icons/icon-192.png" alt="" />
-					<h1 className="large-title">Sofi10</h1>
+					<h1 className="large-title">Rummy10</h1>
 					<p className="subtitle center" style={{ margin: 0 }}>Sign in to play with your friends.</p>
 				</div>
 				<form onSubmit={submit} noValidate>

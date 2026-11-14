@@ -1,4 +1,4 @@
-# Sofi10 v3 — setup and deployment guide
+# Rummy10 v3 — setup and deployment guide
 
 The app is a Next.js 15 project that runs entirely on **Vercel**: pages, API routes and the game engine. All data lives in **Postgres**, either your local server or **Supabase**. Live updates use **Supabase Realtime**. Without Realtime, the app falls back to polling, so it still works locally with plain Postgres.
 

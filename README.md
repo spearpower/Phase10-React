@@ -1,4 +1,4 @@
-# Sofi10 (v3, React)
+# Rummy10 (v3, React)
 
 A real-time card game for 2–6 friends, built mobile-first as an installable PWA. Players race through 10 phases of sets, runs and colour groups.
 
