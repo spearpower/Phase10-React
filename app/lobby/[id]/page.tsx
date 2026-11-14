@@ -17,6 +17,8 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 	const [busy, setBusy] = useState(false);
 	const [pinOpen, setPinOpen] = useState(false);
 	const [copied, setCopied] = useState(false);
+	const [vfOn, setVfOn] = useState(false);
+	useEffect(() => { api<{ virtualFriends: boolean }>('/api/settings').then(s => setVfOn(s.virtualFriends)).catch(() => {}); }, []);
 
 	useEffect(() => { if (data?.status === 'playing' && data.isMember) router.replace(`/game/${id}`); }, [data, id, router]);
 	useEffect(() => { if (data) setTimer(t => (data.timerSec && t === 40 ? data.timerSec : t)); }, [data]);
@@ -63,7 +65,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 							<img className="av" src={avatar(p.photo)} alt="" />
 							<span className="main">
 								<span className="title">{p.username}{p.id === myId ? ' (you)' : ''}</span>
-								<span className="sub">{p.id === data.hostId ? 'Host' : 'Player'} · {p.online ? 'Here' : 'Away'}</span>
+								<span className="sub">{p.isBot ? <span className="vf-badge">Virtual Friend</span> : <>{p.id === data.hostId ? 'Host' : 'Player'} · {p.online ? 'Here' : 'Away'}</>}</span>
 							</span>
 							<span className={`dot${p.online ? ' on' : ''}`} aria-hidden="true" />
 							{isHost && p.id !== myId && (
@@ -72,7 +74,13 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 							)}
 						</div>
 					))}
-					{Array.from({ length: Math.max(0, 6 - data.players.length) }, (_, i) => (
+					{isHost && vfOn && data.players.length < 6 && (
+						<button className="list-row" type="button" disabled={busy} onClick={() => act(() => api(`/api/games/${id}/friends`, {}))}>
+							<span className="av" style={{ display: 'grid', placeItems: 'center', background: 'rgba(98,227,172,.16)', color: 'var(--mint)', fontSize: 24, fontWeight: 700 }} aria-hidden="true">+</span>
+							<span className="main"><span className="title">Add a Virtual Friend</span><span className="sub">A computer player takes this seat</span></span>
+						</button>
+					)}
+					{Array.from({ length: Math.max(0, 6 - data.players.length - (isHost && vfOn ? 1 : 0)) }, (_, i) => (
 						<div className="list-row" key={`open-${i}`} style={{ minHeight: 48 }}><span className="main"><span className="open-seat">Open seat</span></span></div>
 					))}
 				</div>
@@ -97,7 +105,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 						<>
 							<button className="btn btn-primary" type="button" disabled={busy || data.players.length < 2}
 								onClick={() => act(async () => { await api(`/api/games/${id}/start`, { timer }); router.replace(`/game/${id}`); })}>
-								{data.players.length < 2 ? 'Waiting for players…' : 'Start Game'}
+								{data.players.length < 2 ? (vfOn ? 'Invite a friend or add a Virtual Friend' : 'Waiting for players…') : 'Start Game'}
 							</button>
 							<button className="btn btn-plain" type="button" disabled={busy}
 								onClick={() => act(async () => { await api(`/api/games/${id}/leave`, {}); router.replace('/'); })}>Cancel Table</button>

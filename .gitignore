@@ -19,6 +19,7 @@ supabase/.temp/
 # Imports, dumps and connection notes contain real player data or passwords.
 db/*
 !db/schema.sql
+!db/migrations/
 *.sql.gz
 *.dump
 *.backup

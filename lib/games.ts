@@ -4,6 +4,8 @@ import type postgres from 'postgres';
 import { sql } from './db';
 import { Action, apply, autoPlay, GameError, GameState, GameView, newGame, viewFor } from './engine';
 import { Condition } from './rules';
+import { botTurn } from './bot';
+import { getSettings } from './settings';
 import { notifyGame, notifyLobbyList } from './realtime';
 import { Session } from './session';
 
@@ -11,6 +13,14 @@ type Tx = postgres.TransactionSql<{}>;
 
 export const ROUND_SUMMARY_SECONDS = 8; // extra time on the first turn of a round while players read the summary
 const ONLINE_SECONDS = 20;
+const MAX_VIRTUAL_FRIENDS = 5;
+/** A Virtual Friend "thinks" for 1.4–2.4 s so people can follow the play. */
+const botSeconds = () => 1.4 + Math.random();
+const isBotTurn = (st: GameState | null) => !!st && st.turn !== null && !!st.bots?.includes(st.turn);
+/** Play whatever is due: a Virtual Friend's turn, or a person's timed-out turn. */
+function runDueTurn(st: GameState) {
+	return isBotTurn(st) ? botTurn(st, st.turn!) : autoPlay(st);
+}
 
 let phaseCache: Record<number, Record<string, Condition[]>> = {};
 async function phasesFor(edition: number): Promise<Record<string, Condition[]>> {
@@ -126,11 +136,15 @@ export async function startGame(user: Session, gameId: number, timerSec: number)
 		const g = await lock(tx, gameId);
 		if (g.host_id !== user.id) throw new GameError('Only the host can start the game', 403);
 		if (g.status !== 'lobby') throw new GameError('The game has already started', 409);
-		const players = await tx<{ user_id: number }[]>`select user_id from game_players where game_id = ${gameId} order by seat`;
+		const players = await tx<{ user_id: number; is_bot: boolean }[]>`
+			select p.user_id, u.is_bot from game_players p join users u on u.id = p.user_id where p.game_id = ${gameId} order by p.seat`;
 		if (players.length < 2) throw new GameError('You need at least 2 players to start');
+		const bots = players.filter(p => p.is_bot).map(p => p.user_id);
+		if (bots.length && !(await getSettings()).virtualFriends) throw new GameError('Virtual Friends are switched off. Remove them to start.', 409);
 		const state = newGame(g.edition, players.map(p => p.user_id), await phasesFor(g.edition));
+		state.bots = bots;
 		await tx`update games set timer_sec = ${timerSec} where id = ${gameId}`;
-		await save(tx, { ...g, timer_sec: timerSec }, state, true);
+		await save(tx, { ...g, timer_sec: timerSec }, state, false); // round 1: no summary to read
 	});
 	await ping(gameId);
 	await notifyLobbyList();
@@ -156,6 +170,50 @@ export async function playAgain(user: Session, gameId: number): Promise<number> 
 	return newId;
 }
 
+/** Host adds one Virtual Friend to their waiting room. */
+export async function addVirtualFriend(user: Session, gameId: number): Promise<void> {
+	if (!(await getSettings()).virtualFriends) throw new GameError('Virtual Friends are switched off by the admin', 403);
+	await sql.begin(async tx => {
+		const g = await lock(tx, gameId);
+		if (g.host_id !== user.id) throw new GameError('Only the host can add Virtual Friends', 403);
+		if (g.status !== 'lobby') throw new GameError('The game has already started', 409);
+		const seats = await tx<{ user_id: number; seat: number; is_bot: boolean }[]>`
+			select p.user_id, p.seat, u.is_bot from game_players p join users u on u.id = p.user_id where p.game_id = ${gameId}`;
+		if (seats.length >= 6) throw new GameError('This table is full (6 players)', 409);
+		if (seats.filter(x => x.is_bot).length >= MAX_VIRTUAL_FRIENDS) throw new GameError('A table can have up to 5 Virtual Friends', 409);
+		const [bot] = await tx<{ id: number }[]>`
+			select id from users where is_bot and status = 'active'
+			  and id not in (select user_id from game_players where game_id = ${gameId})
+			order by random() limit 1`;
+		if (!bot) throw new GameError('No more Virtual Friends are free', 409);
+		const taken = new Set(seats.map(x => x.seat));
+		const seat = [1, 2, 3, 4, 5, 6].find(x => !taken.has(x))!;
+		await tx`insert into game_players (game_id, user_id, seat) values (${gameId}, ${bot.id}, ${seat})`;
+		await bump(tx, gameId);
+	});
+	await ping(gameId);
+}
+
+/** One tap: a private table with `count` Virtual Friends that starts right away. */
+export async function startPractice(user: Session, count: number, timerSec: number): Promise<number> {
+	if (!(await getSettings()).virtualFriends) throw new GameError('Virtual Friends are switched off by the admin', 403);
+	const n = Math.max(1, Math.min(MAX_VIRTUAL_FRIENDS, Math.floor(count)));
+	const phases = await phasesFor(1);
+	return sql.begin(async tx => {
+		await tx`update games set status = 'abandoned' where host_id = ${user.id} and status = 'lobby'`;
+		const pin = String(1000 + Math.floor(Math.random() * 9000)); // private, so it never shows in Open tables
+		const [g] = await tx<GameRow[]>`insert into games (host_id, pin, timer_sec) values (${user.id}, ${pin}, ${timerSec}) returning *`;
+		const bots = await tx<{ id: number }[]>`select id from users where is_bot and status = 'active' order by random() limit ${n}`;
+		if (!bots.length) throw new GameError('No Virtual Friends are set up yet. Ask the admin to run the database update.', 409);
+		const ids = [user.id, ...bots.map(b => b.id)];
+		for (let i = 0; i < ids.length; i++) await tx`insert into game_players (game_id, user_id, seat) values (${g.id}, ${ids[i]}, ${i + 1})`;
+		const state = newGame(1, ids, phases);
+		state.bots = bots.map(b => b.id);
+		await save(tx, g, state, false);
+		return g.id;
+	});
+}
+
 // ---------- Playing ----------
 
 export async function move(user: Session, gameId: number, action: Action): Promise<void> {
@@ -169,7 +227,7 @@ export async function move(user: Session, gameId: number, action: Action): Promi
 			// Any player's device may report the timer; the server decides if it really ran out
 			if (!g.turn_deadline || g.turn_deadline.getTime() > Date.now() + 1000) return;
 			const before = state.round;
-			autoPlay(state);
+			runDueTurn(state);
 			await save(tx, g, state, state.round !== before);
 		} else {
 			const before = state.round;
@@ -188,21 +246,24 @@ export async function getGame(user: Session, gameId: number) {
 	if (!g) throw new GameError('Game not found', 404);
 
 	// Turn timer ran out and nobody reported it (e.g. that player closed the app): play it now
-	if (g.status === 'playing' && g.turn_deadline && g.turn_deadline.getTime() < Date.now() - 2000) {
+	// (Virtual Friends move as soon as their thinking time is up; people get a 2 s grace)
+	const grace = (row: GameRow) => (isBotTurn(row.state) ? 0 : 2000);
+	if (g.status === 'playing' && g.turn_deadline && g.turn_deadline.getTime() < Date.now() - grace(g)) {
 		let changed = false;
 		await sql.begin(async tx => {
 			const locked = await lock(tx, gameId);
-			if (locked.status !== 'playing' || !locked.state || !locked.turn_deadline || locked.turn_deadline.getTime() >= Date.now() - 2000) return;
+			if (locked.status !== 'playing' || !locked.state || !locked.turn_deadline || locked.turn_deadline.getTime() >= Date.now() - grace(locked)) return;
 			const before = locked.state.round;
-			autoPlay(locked.state);
+			runDueTurn(locked.state);
 			await save(tx, locked, locked.state, locked.state.round !== before);
 			changed = true;
 		});
 		if (changed) { await ping(gameId); [g] = await sql<GameRow[]>`select * from games where id = ${gameId}`; }
 	}
 
-	const players = await sql<{ user_id: number; seat: number; username: string; photo: string; online: boolean }[]>`
-		select p.user_id, p.seat, u.username, u.photo, (p.last_seen > now() - make_interval(secs => ${ONLINE_SECONDS})) as online
+	const players = await sql<{ user_id: number; seat: number; username: string; photo: string; online: boolean; is_bot: boolean }[]>`
+		select p.user_id, p.seat, u.username, u.photo, u.is_bot,
+		       (u.is_bot or p.last_seen > now() - make_interval(secs => ${ONLINE_SECONDS})) as online
 		from game_players p join users u on u.id = p.user_id
 		where p.game_id = ${gameId} order by p.seat`;
 	const isMember = players.some(p => p.user_id === user.id);
@@ -222,7 +283,8 @@ export async function getGame(user: Session, gameId: number) {
 		deadline: g.turn_deadline ? g.turn_deadline.toISOString() : null,
 		serverNow: new Date().toISOString(),
 		nextGameId: g.next_game_id,
-		players: players.map(p => ({ id: p.user_id, seat: p.seat, username: p.username, photo: p.photo, online: p.online })),
+		players: players.map(p => ({ id: p.user_id, seat: p.seat, username: p.username, photo: p.photo, online: p.online, isBot: p.is_bot })),
+		practice: !!g.state?.bots?.length,
 		view,
 	};
 }
@@ -234,7 +296,7 @@ export async function leaderboard() {
 		)
 		select u.id, u.username, u.photo, sum(gp.points)::int as points, count(*)::int as games
 		from game_points gp join users u on u.id = gp.user_id, month
-		where gp.created_at >= month.start
+		where gp.created_at >= month.start and not u.is_bot
 		group by u.id order by points desc, games asc, u.username
 		limit 50`;
 }
@@ -259,7 +321,10 @@ async function bump(tx: Tx, gameId: number) {
 /** Persist engine state, turn deadline, per-player progress and (at the end) points. */
 async function save(tx: Tx, g: GameRow, state: GameState, newRound: boolean) {
 	const finished = !!state.finished;
-	const secs = finished || !state.turn || !g.timer_sec ? null : g.timer_sec + (newRound ? ROUND_SUMMARY_SECONDS : 0);
+	const extra = newRound ? ROUND_SUMMARY_SECONDS : 0;
+	const secs = finished || !state.turn ? null
+		: isBotTurn(state) ? botSeconds() + extra
+		: g.timer_sec ? g.timer_sec + extra : null;
 	await tx`
 		update games set
 			state = ${tx.json(state as never)},
@@ -276,7 +341,8 @@ async function save(tx: Tx, g: GameRow, state: GameState, newRound: boolean) {
 		await tx`update game_players set phase = ${p.phase}, score = ${p.score}, final_rank = ${rank}
 			where game_id = ${g.id} and user_id = ${id}`;
 	}
-	if (state.finished) {
+	// Games with Virtual Friends are practice: no leaderboard points
+	if (state.finished && !state.bots?.length) {
 		for (const s of state.finished.standings) {
 			await tx`insert into game_points (user_id, game_id, points) values (${s.id}, ${g.id}, ${s.points})
 				on conflict (game_id, user_id) do nothing`;

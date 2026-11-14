@@ -3,12 +3,18 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/http';
 import { NavBar, TabBar, Chevron } from '@/components/ui';
 import SignOutButton from '@/components/SignOutButton';
+import { getSettings } from '@/lib/settings';
+import { avatarUrl } from '@/lib/avatars';
+import { sql } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PlayPage() {
 	const user = await currentUser();
 	if (!user) redirect('/signin');
+	const { virtualFriends } = await getSettings();
+	// name/avatar may have been changed on another device: read the current ones
+	const [me] = await sql<{ username: string; photo: string }[]>`select username, photo from users where id = ${user.id}`.catch(() => [user]);
 	return (
 		<div className="app has-tabs">
 			<NavBar trailing={<SignOutButton />} />
@@ -16,13 +22,14 @@ export default async function PlayPage() {
 				<h1 className="large-title">Play</h1>
 				<p className="subtitle">Get 2–6 friends together and race through the 10 phases.</p>
 
-				<section className="profile" aria-label="Signed in player">
-					<img className="avatar" src={`/avatars/${user.photo}`} alt="" />
+				<Link href="/account" className="profile" aria-label="Your account" style={{ color: 'inherit', textDecoration: 'none' }}>
+					<img className="avatar" src={avatarUrl(me?.photo || user.photo)} alt="" />
 					<div className="who">
 						<div className="hello">Signed in as</div>
-						<div className="name">{user.username}</div>
+						<div className="name">{me?.username || user.username}</div>
 					</div>
-				</section>
+					<Chevron />
+				</Link>
 
 				<Link href="/host" className="btn btn-primary">
 					<svg className="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -42,6 +49,19 @@ export default async function PlayPage() {
 						<Chevron />
 					</Link>
 				</nav>
+
+				{virtualFriends && (
+					<>
+						<div className="section-title">Practice</div>
+						<nav className="group" aria-label="Practice">
+							<Link className="row-link" href="/practice">
+								<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3" /><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16h5" /></svg></span>
+								<span className="row-text"><span className="row-title">Play with Virtual Friends</span><span className="row-sub">Start now against 1–5 computer players</span></span>
+								<Chevron />
+							</Link>
+						</nav>
+					</>
+				)}
 			</main>
 			<TabBar />
 		</div>

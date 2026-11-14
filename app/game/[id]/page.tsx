@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, avatar, cardSrc, haptic, useGame, type GameData } from '@/lib/client';
 import { conditionLabel, meetsCondition, placeInGroup, type Condition } from '@/lib/rules';
 import type { Action, GameView, PlayerView } from '@/lib/engine';
+import { initSound, playTurnSound, setSoundOn, soundOn } from '@/lib/sound';
 
 // Pure helpers (no node 'crypto' import on the client)
 const isWild = (c: string) => c[1] === 'w';
@@ -26,6 +27,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const [left, setLeft] = useState<number | null>(null);
 	const reported = useRef<string | null>(null);
 	const wasMyTurn = useRef(false);
+	const [sound, setSound] = useState(true);
+	useEffect(() => { initSound(); setSound(soundOn()); }, []);
 
 	const view = data?.view ?? null;
 	const me = data?.me ?? 0;
@@ -43,7 +46,10 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	// haptic tick when your turn starts
 	const myTurn = !!view && view.turn === me;
-	useEffect(() => { if (myTurn && !wasMyTurn.current) haptic(30); wasMyTurn.current = myTurn; }, [myTurn]);
+	useEffect(() => {
+		if (myTurn && !wasMyTurn.current) { haptic(30); playTurnSound(); }
+		wasMyTurn.current = myTurn;
+	}, [myTurn]);
 
 	// turn timer (server clock), and report a timeout once when it hits zero
 	useEffect(() => {
@@ -102,7 +108,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		hint = selected ? (mine.done ? 'Tap a group or the discard pile' : 'Tap a group or the discard pile')
 			: mine.done ? 'Add to a group, then discard' : allMet ? 'Tap Lay Down, then discard' : 'Build your phase, then discard';
 	} else {
-		hint = `${nameOf(view.turn!)}’s turn${mine.skipped ? ' · You’ll be skipped' : ''}`;
+		hint = names[view.turn!]?.isBot ? `${nameOf(view.turn!)} is thinking…` : `${nameOf(view.turn!)}’s turn${mine.skipped ? ' · You’ll be skipped' : ''}`;
 	}
 
 	// ----- actions -----
@@ -147,8 +153,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 							<div className="top">
 								<img className="av" src={avatar(names[r.id]?.photo || 'na.png')} alt="" />
 								<div className="who">
-									<span className="nm">{nameOf(r.id)}</span>
-									<span className="st">Phase {r.phase} · {r.score} pts{view.turn === r.id && left !== null ? ` · ${left}s` : ''}</span>
+									<span className="nm">{nameOf(r.id)}{names[r.id]?.isBot && <> <span className="vf-badge">Virtual</span></>}</span>
+									<span className="st">Phase {r.phase} · {r.score} pts{view.turn === r.id ? (names[r.id]?.isBot ? ' · thinking…' : left !== null ? ` · ${left}s` : '') : ''}</span>
 								</div>
 								<span className={`cnt${r.handCount <= 2 ? ' low' : ''}`} aria-label={`${r.handCount} cards in hand`}>{r.handCount}</span>
 							</div>
@@ -238,6 +244,13 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</Link>
 				<span className="me-info"><b>{names[me]?.username}</b> · Phase {mine.phase} · Round {view.round}</span>
 				<span>{mine.score} pts</span>
+				<button type="button" aria-pressed={sound} aria-label={sound ? 'Turn chime on. Tap to mute.' : 'Turn chime off. Tap to unmute.'}
+					onClick={() => { const on = !sound; setSound(on); setSoundOn(on); }}>
+					<svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 20, height: 20, strokeWidth: 2 }}>
+						<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+						{!sound && <path d="M3 3l18 18" />}
+					</svg>
+				</button>
 			</footer>
 
 			{toast && <div className="toast" role="alert">{toast}</div>}
@@ -289,13 +302,15 @@ function FinishedSheet({ data, view, nameOf }: { data: GameData; view: GameView;
 			<div className="sheet" role="dialog" aria-modal="true" aria-label="Final standings">
 				<div className="grabber" />
 				<h2>{st[0].id === data.me ? 'You won!' : `${nameOf(st[0].id)} wins`}</h2>
-				<p className="subtitle center">You earned <b style={{ color: 'var(--gold)' }}>{myPts}</b> {myPts === 1 ? 'point' : 'points'} for the monthly leaderboard.</p>
+				<p className="subtitle center">{data.practice
+					? 'Practice game with Virtual Friends — no leaderboard points.'
+					: <>You earned <b style={{ color: 'var(--gold)' }}>{myPts}</b> {myPts === 1 ? 'point' : 'points'} for the monthly leaderboard.</>}</p>
 				<div className="list">
 					{st.map(s => (
 						<div key={s.id} className={`list-row${s.id === data.me ? ' me' : ''}`}>
 							<span className="rank">{s.rank}</span>
 							<span className="main"><span className="title">{nameOf(s.id)}</span><span className="sub">Phase {s.phase} · {s.score} pts</span></span>
-							<span className="meta"><b>+{s.points}</b></span>
+							{!data.practice && <span className="meta"><b>+{s.points}</b></span>}
 						</div>
 					))}
 				</div>

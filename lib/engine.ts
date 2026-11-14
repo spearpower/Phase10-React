@@ -38,6 +38,7 @@ export interface GameState {
 	finished: { standings: Standing[] } | null;
 	log: string[];                         // short recent events, newest first
 	reshuffles?: number;                   // deck refills this round (stalemate guard)
+	bots?: number[];                       // Virtual Friends at this table (played by lib/bot.ts)
 }
 
 export type Action =

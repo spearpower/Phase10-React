@@ -87,7 +87,22 @@ Free-plan caveat: Supabase pauses a free project after about a week with no acti
 - [ ] Finish a game: the standings appear, **Scores** shows the points, and **Play Again** brings everyone back to the table.
 - [ ] Install to the home screen and reopen. Turn on airplane mode: the "You're offline" screen appears.
 
-## 6. How a move works (for developers)
+## 6. Database updates (migrations)
+
+New features sometimes need database changes. These live in `db/migrations/` and are numbered. Each one is safe to run more than once, and each one only adds things, so the live app keeps working while you apply it.
+
+**Always run a new migration on Supabase *before* the code that needs it goes live.**
+
+1. Supabase → **SQL Editor → New query** → paste the migration file → **Run**.
+2. For your local database: pgAdmin → **Query Tool** → open the file → **Execute**.
+
+| File | Adds |
+|---|---|
+| `001_virtual_friends_accounts.sql` | Virtual Friends (6 computer players), the `app_settings` table (admin switches), `users.is_bot` |
+
+To make someone an admin, run `update users set role = 'admin' where lower(username) = lower('their-name');`. The **Admin** link then appears on their Account page.
+
+## 7. How a move works (for developers)
 1. The client sends `POST /api/games/:id/move` with `{type: 'draw' | 'place' | 'unstage' | 'layDown' | 'hit' | 'discard' | 'skip' | 'timeout', ...}`.
 2. The server opens a transaction, runs `SELECT … FOR UPDATE` on the game row, and applies `lib/engine.ts`, which validates the move.
 3. It saves the state, bumps `version`, and sets the turn deadline.

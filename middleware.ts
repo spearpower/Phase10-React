@@ -24,5 +24,5 @@ export async function middleware(req: NextRequest) {
 
 // Pages only: API routes check the session themselves; static files are public.
 export const config = {
-	matcher: ['/((?!api|_next/static|_next/image|cards|avatars|icons|sw.js|manifest.webmanifest|offline.html|favicon.ico).*)'],
+	matcher: ['/((?!api|_next/static|_next/image|cards|avatars|icons|sounds|sw.js|manifest.webmanifest|offline.html|favicon.ico).*)'],
 };

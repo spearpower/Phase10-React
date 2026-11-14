@@ -21,11 +21,11 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 	return data as T;
 }
 
-export interface LobbyPlayer { id: number; seat: number; username: string; photo: string; online: boolean }
+export interface LobbyPlayer { id: number; seat: number; username: string; photo: string; online: boolean; isBot?: boolean }
 export interface GameData {
 	id: number; me: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned'; hostId: number; isMember: boolean;
 	pin: string | null; private: boolean; timerSec: number; version: number; deadline: string | null;
-	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null;
+	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; practice?: boolean;
 }
 
 const RT_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -88,6 +88,6 @@ export function useGame(id: number) {
 	return { data, error, refresh, accept, serverNow: () => Date.now() + skew.current };
 }
 
-export const avatar = (photo: string) => `/avatars/${/^(?:[1-9]|10|na)\.png$/.test(photo) ? photo : 'na.png'}`;
+export { avatarUrl as avatar } from './avatars';
 export const cardSrc = (code: string) => `/cards/${code.slice(1)}.svg`;
 export function haptic(ms = 12) { try { navigator.vibrate?.(ms); } catch { /* not supported */ } }

@@ -6,6 +6,9 @@ A real-time card game for 2–6 friends, built mobile-first as an installable PW
 - **Game engine:** `lib/engine.ts` is pure and unit-tested. The server validates every move. Other players' hands never leave the server.
 - **Sign-in:** username + password, stored as bcrypt hashes in Postgres. The session is a signed, httpOnly cookie.
 - **Board:** tap a card, then tap where it goes (a group, a rival's laid-down group, or the discard pile). It's laid out with CSS for portrait and landscape phones.
+- **Virtual Friends:** computer players (`lib/bot.ts`). Start a practice game against 1–5 of them, or add them to empty seats in a waiting room. An admin can switch the feature on or off. Practice games don't award leaderboard points.
+- **Turn chime:** `public/sounds/turn.wav`, synthesized by `tools/gen_ding.py`. It plays when your turn starts and can be muted on the table or on the Account page.
+- **Account:** change your username, name, contact details, avatar (from a pool of 34) and password.
 
 | Path | What |
 |---|---|

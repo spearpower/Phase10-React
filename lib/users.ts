@@ -2,17 +2,18 @@ import { randomInt } from 'crypto';
 import { sql } from './db';
 import { GameError } from './engine';
 import { Session } from './session';
+import { AVATARS, isAvatar } from './avatars';
 
-interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin'; status: string; ok: boolean }
+interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin'; status: string; ok: boolean; is_bot?: boolean }
 
 export async function signIn(username: string, password: string): Promise<Session> {
 	const u = (username || '').trim();
 	if (!u || !password) throw new GameError('Enter your username and password');
 	const [row] = await sql<UserRow[]>`
-		select id, username, photo, role, status, app_check_password(${password}, password_hash) as ok
+		select id, username, photo, role, status, is_bot, app_check_password(${password}, password_hash) as ok
 		from users where lower(username) = lower(${u})`;
 	// Same message for unknown user and wrong password, so usernames can't be probed
-	if (!row || !row.ok) throw new GameError('That username and password don’t match', 401);
+	if (!row || !row.ok || row.is_bot) throw new GameError('That username and password don’t match', 401);
 	if (row.status !== 'active') throw new GameError('This account is suspended. Contact the admin.', 403);
 	await sql`update users set last_login_at = now() where id = ${row.id}`;
 	return { id: row.id, username: row.username, photo: row.photo, role: row.role };
@@ -35,10 +36,56 @@ export async function signUp(input: Partial<SignUpInput>): Promise<Session> {
 
 	const [taken] = await sql`select 1 from users where lower(username) = lower(${username})`;
 	if (taken) throw new GameError('That username is taken. Try another.', 409);
-	const photo = `${randomInt(1, 11)}.png`;
+	const photo = AVATARS[randomInt(AVATARS.length)];
 	const [row] = await sql<{ id: number }[]>`
 		insert into users (username, password_hash, fullname, email, phone, photo)
 		values (${username}, app_hash_password(${password}), ${fullname}, ${email}, ${phone}, ${photo})
 		returning id`;
 	return { id: row.id, username, photo, role: 'player' };
+}
+
+// ---------- Account ----------
+
+export interface Account { id: number; username: string; fullname: string; email: string | null; phone: string | null; photo: string; role: 'player' | 'admin' }
+
+export async function getAccount(id: number): Promise<Account> {
+	const [row] = await sql<Account[]>`select id, username, fullname, email, phone, photo, role from users where id = ${id} and not is_bot`;
+	if (!row) throw new GameError('Account not found', 404);
+	return row;
+}
+
+export interface AccountUpdate { username: string; fullname: string; email: string; phone: string; photo: string }
+
+/** Update profile fields. Returns the fresh session data (the cookie carries username + avatar). */
+export async function updateAccount(id: number, input: Partial<AccountUpdate>): Promise<Session> {
+	const cur = await getAccount(id);
+	const username = (input.username ?? cur.username).trim();
+	const fullname = (input.fullname ?? cur.fullname).trim();
+	const email = (input.email ?? cur.email ?? '').trim() || null;
+	const phone = (input.phone ?? cur.phone ?? '').replace(/\D/g, '') || null;
+	const photo = input.photo ?? cur.photo;
+	if (!/^[A-Za-z0-9]{2,20}$/.test(username)) throw new GameError('Username: 2–20 letters or numbers, no spaces');
+	if (!fullname) throw new GameError('Enter your full name');
+	if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError('That email doesn’t look right');
+	if (phone && (phone.length < 9 || phone.length > 13)) throw new GameError('That phone number doesn’t look right');
+	if (!isAvatar(photo)) throw new GameError('Pick an avatar from the list');
+	if (username.toLowerCase() !== cur.username.toLowerCase()) {
+		const [taken] = await sql`select 1 from users where lower(username) = lower(${username}) and id <> ${id}`;
+		if (taken) throw new GameError('That username is taken. Try another.', 409);
+	}
+	try {
+		await sql`update users set username = ${username}, fullname = ${fullname}, email = ${email}, phone = ${phone}, photo = ${photo} where id = ${id}`;
+	} catch (e) {
+		if ((e as { code?: string }).code === '23505') throw new GameError('That username is taken. Try another.', 409);
+		throw e;
+	}
+	return { id, username, photo, role: cur.role };
+}
+
+export async function changePassword(id: number, current: string, next: string, repeat: string): Promise<void> {
+	if (next.length < 6) throw new GameError('Use a new password of at least 6 characters');
+	if (next !== repeat) throw new GameError('The two new passwords don’t match');
+	const [row] = await sql<{ ok: boolean }[]>`select app_check_password(${current}, password_hash) as ok from users where id = ${id} and not is_bot`;
+	if (!row?.ok) throw new GameError('Your current password isn’t right', 403);
+	await sql`update users set password_hash = app_hash_password(${next}) where id = ${id}`;
 }
