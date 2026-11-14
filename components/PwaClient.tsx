@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { isChunkError, reloadForNewVersion, reportError } from '@/lib/report';
 
 interface BeforeInstallPromptEvent extends Event { prompt: () => Promise<void>; userChoice: Promise<unknown> }
 const DISMISSED = 'sofi10.installDismissed';
@@ -16,6 +17,11 @@ export default function PwaClient() {
 		if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
 			navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
 		}
+		// report errors that never reach an error screen; reload once if an old copy can't load a file
+		const onError = (e: ErrorEvent) => { if (isChunkError(e.error || e.message)) reloadForNewVersion(); else reportError(e.error || e.message, 'window.onerror'); };
+		const onRejection = (e: PromiseRejectionEvent) => { if (isChunkError(e.reason)) reloadForNewVersion(); else reportError(e.reason, 'unhandledrejection'); };
+		window.addEventListener('error', onError);
+		window.addEventListener('unhandledrejection', onRejection);
 		const on = () => setOffline(false), off = () => setOffline(true);
 		setOffline(navigator.onLine === false);
 		window.addEventListener('online', on); window.addEventListener('offline', off);
@@ -27,7 +33,7 @@ export default function PwaClient() {
 		window.addEventListener('beforeinstallprompt', onPrompt);
 		const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 		const t = ios && !dismissed && !standalone ? setTimeout(() => setIosHint(true), 1500) : undefined;
-		return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); window.removeEventListener('beforeinstallprompt', onPrompt); if (t) clearTimeout(t); };
+		return () => { window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onRejection); window.removeEventListener('online', on); window.removeEventListener('offline', off); window.removeEventListener('beforeinstallprompt', onPrompt); if (t) clearTimeout(t); };
 	}, []);
 
 	const dismiss = () => { try { localStorage.setItem(DISMISSED, '1'); } catch { /* ignore */ } setPrompt(null); setIosHint(false); };
