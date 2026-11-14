@@ -1,8 +1,15 @@
 'use client';
-// "Your turn" chime (public/sounds/turn.wav, made by tools/gen_ding.py).
-// Phones only allow sound after the person has tapped once, so the first tap anywhere unlocks it.
+// Game sounds (public/sounds/*.wav, made by tools/gen_ding.py and tools/gen_sounds.py).
+// Phones only allow sound after the person has tapped once, so the first tap anywhere unlocks them.
+// One switch (Account page or the bell on the table) mutes them all.
+export type SoundName = 'turn' | 'discard' | 'phase' | 'round' | 'win' | 'skip';
+const FILES: Record<SoundName, string> = {
+	turn: '/sounds/turn.wav', discard: '/sounds/discard.wav', phase: '/sounds/phase.wav',
+	round: '/sounds/round.wav', win: '/sounds/win.wav', skip: '/sounds/skip.wav',
+};
+const VOLUME: Record<SoundName, number> = { turn: 0.8, discard: 0.55, phase: 0.75, round: 0.8, win: 0.85, skip: 0.7 };
 const KEY = 'rummy10.sound';
-let audio: HTMLAudioElement | null = null;
+const players: Partial<Record<SoundName, HTMLAudioElement>> = {};
 let armed = false;
 
 export function soundOn(): boolean {
@@ -11,21 +18,27 @@ export function soundOn(): boolean {
 
 export function setSoundOn(on: boolean) {
 	try { localStorage.setItem(KEY, on ? 'on' : 'off'); } catch { /* storage blocked: stays on for this visit */ }
-	if (on) playTurnSound(true);
+	if (on) playSound('turn', true);
 }
 
-/** Call once on pages that may ding (the game board). */
+/** Call once on pages that play sounds (the game board, the Account page). */
 export function initSound() {
-	if (typeof window === 'undefined' || audio) return;
-	audio = new Audio('/sounds/turn.wav');
-	audio.preload = 'auto';
-	audio.volume = 0.8;
+	if (typeof window === 'undefined') return;
+	for (const name of Object.keys(FILES) as SoundName[]) {
+		if (players[name]) continue;
+		const a = new Audio(FILES[name]);
+		a.preload = 'auto';
+		a.volume = VOLUME[name];
+		players[name] = a;
+	}
 	if (armed) return;
 	armed = true;
 	const unlock = () => {
-		if (!audio) return;
-		audio.muted = true;
-		audio.play().then(() => { audio!.pause(); audio!.currentTime = 0; audio!.muted = false; }).catch(() => { audio!.muted = false; });
+		for (const a of Object.values(players)) {
+			if (!a) continue;
+			a.muted = true;
+			a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
+		}
 		window.removeEventListener('pointerdown', unlock);
 		window.removeEventListener('keydown', unlock);
 	};
@@ -33,7 +46,11 @@ export function initSound() {
 	window.addEventListener('keydown', unlock, { once: true });
 }
 
-export function playTurnSound(force = false) {
-	if (!audio || (!force && !soundOn())) return;
-	try { audio.currentTime = 0; audio.play().catch(() => { /* not unlocked yet */ }); } catch { /* ignore */ }
+export function playSound(name: SoundName, force = false) {
+	const a = players[name];
+	if (!a || (!force && !soundOn())) return;
+	try { a.currentTime = 0; a.play().catch(() => { /* not unlocked yet */ }); } catch { /* ignore */ }
 }
+
+/** Back-compat for the turn chime. */
+export const playTurnSound = (force = false) => playSound('turn', force);

@@ -34,7 +34,7 @@ export interface GameState {
 	step: Step;
 	phases: Record<string, Condition[]>;   // phase_no -> conditions for this edition
 	maxPhase: number;
-	lastRound: { round: number; results: RoundResult[] } | null;
+	lastRound: { round: number; results: RoundResult[]; wentOut?: number | null } | null;
 	finished: { standings: Standing[] } | null;
 	log: string[];                         // short recent events, newest first
 	reshuffles?: number;                   // deck refills this round (stalemate guard)
@@ -157,7 +157,7 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 				// Stalemate: everyone has laid down and the deck went round 3 times with nobody going out
 				if ((s.reshuffles || 0) >= 3 && s.order.every(id => s.players[String(id)].done)) {
 					log(s, 'No one could go out — round ends');
-					return { roundEnded: endRound(s) };
+					return { roundEnded: endRound(s, null) };
 				}
 				p.hand.push(s.deck.shift()!);
 				log(s, `${who(me)} drew from the deck`);
@@ -176,7 +176,7 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 			if (!next) throw new GameError('That card doesn’t fit there');
 			takeFromHand(p, a.card);
 			p.groups[a.group] = next;
-			if (p.done && p.hand.length === 0) return { roundEnded: endRound(s) };
+			if (p.done && p.hand.length === 0) return { roundEnded: endRound(s, me) };
 			return { roundEnded: false };
 		}
 
@@ -196,7 +196,7 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 			});
 			p.done = true;
 			log(s, `${who(me)} completed phase ${p.phase}`);
-			if (p.hand.length === 0) return { roundEnded: endRound(s) };
+			if (p.hand.length === 0) return { roundEnded: endRound(s, me) };
 			return { roundEnded: false };
 		}
 
@@ -212,7 +212,7 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 			if (!next) throw new GameError('That card doesn’t fit there');
 			takeFromHand(p, a.card);
 			t.groups[a.group] = next;
-			if (p.hand.length === 0) return { roundEnded: endRound(s) };
+			if (p.hand.length === 0) return { roundEnded: endRound(s, me) };
 			return { roundEnded: false };
 		}
 
@@ -222,7 +222,7 @@ export function apply(s: GameState, me: number, a: Action): { roundEnded: boolea
 			s.discard.unshift(a.card);
 			if (p.hand.length === 0) {
 				log(s, `${who(me)} went out`);
-				return { roundEnded: endRound(s) };
+				return { roundEnded: endRound(s, me) };
 			}
 			if (isSkip(a.card) && skipTargets(s, me).length > 0) {
 				s.step = 'skip';
@@ -265,7 +265,7 @@ export function autoPlay(s: GameState): { roundEnded: boolean } {
 		takeFromHand(p, card);
 		s.discard.unshift(card);
 		log(s, `${who(id)} ran out of time`);
-		if (p.hand.length === 0) return { roundEnded: endRound(s) };
+		if (p.hand.length === 0) return { roundEnded: endRound(s, id) };
 		passTurn(s, id);
 		return { roundEnded: false };
 	}
@@ -279,7 +279,7 @@ export function autoPlay(s: GameState): { roundEnded: boolean } {
 // ---------- Round end ----------
 
 /** Scores the round, advances phases, then deals the next round or finishes the game. Returns true. */
-export function endRound(s: GameState): boolean {
+export function endRound(s: GameState, wentOut: number | null = null): boolean {
 	const results: RoundResult[] = [];
 	let someoneFinished = false;
 	for (const id of s.order) {
@@ -291,7 +291,7 @@ export function endRound(s: GameState): boolean {
 		if (p.done && p.phase >= s.maxPhase) someoneFinished = true;
 		if (p.done && p.phase < s.maxPhase) p.phase += 1;
 	}
-	s.lastRound = { round: s.round, results };
+	s.lastRound = { round: s.round, results, wentOut };
 
 	if (someoneFinished) {
 		// Phase reached (desc), then fewest penalty points

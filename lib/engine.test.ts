@@ -100,6 +100,7 @@ describe('engine', () => {
 		expect(s.players[String(other)].phase).toBe(1);
 		expect(s.round).toBe(2);
 		expect(s.players[String(me)].groups.length).toBe(2);
+		expect(s.lastRound!.wentOut).toBe(me);
 	});
 
 	it('skip: target loses their next turn (2 players: you go again)', () => {

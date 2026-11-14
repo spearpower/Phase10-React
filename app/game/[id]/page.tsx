@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { api, avatar, cardSrc, haptic, useGame, type GameData } from '@/lib/client';
 import { conditionLabel, meetsCondition, placeInGroup, type Condition } from '@/lib/rules';
 import type { Action, GameView, PlayerView } from '@/lib/engine';
-import { initSound, playTurnSound, setSoundOn, soundOn } from '@/lib/sound';
+import { initSound, playSound, playTurnSound, setSoundOn, soundOn } from '@/lib/sound';
+import { Bubbles, Confetti, Crown, type Bubble, type BubbleKind } from '@/components/Celebrate';
 
 // Pure helpers (no node 'crypto' import on the client)
 const isWild = (c: string) => c[1] === 'w';
@@ -33,6 +34,15 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const wasMyTurn = useRef(false);
 	const [sound, setSound] = useState(true);
 	useEffect(() => { initSound(); setSound(soundOn()); }, []);
+	const [bubbles, setBubbles] = useState<Bubble[]>([]);
+	const [party, setParty] = useState<null | 'round' | 'win'>(null);
+	const bubbleSeq = useRef(0);
+	const prevView = useRef<GameView | null>(null);
+	const bubble = useCallback((text: string, kind: BubbleKind, ms = 2800) => {
+		const bid = ++bubbleSeq.current;
+		setBubbles(b => [...b.slice(-2), { id: bid, text, kind }]);
+		setTimeout(() => setBubbles(b => b.filter(x => x.id !== bid)), ms);
+	}, []);
 
 	// What we show: the server's view, or our prediction while moves are on their way
 	const view = optimistic ?? data?.view ?? null;
@@ -59,13 +69,61 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		prevHand.current = h;
 	}, [view?.hand]);
 
+	// ----- table events: compare the previous view with the new one (same on every phone) -----
+	useEffect(() => {
+		const v = view, p = prevView.current;
+		prevView.current = v;
+		if (!v || !p) return; // first load: don't replay old events
+		const who = (pid: number | null | undefined) => (pid === me ? 'You' : (pid && names[pid]?.username) || 'Someone');
+
+		if (v.finished && !p.finished) {
+			const w = v.finished.standings[0].id;
+			bubble(w === me ? 'You won the game!' : `${who(w)} wins the game!`, 'win', 5500);
+			playSound('win'); haptic(60); setParty('win');
+			return;
+		}
+		if (v.round > p.round && v.lastRound && v.lastRound.round === p.round) {
+			const w = v.lastRound.wentOut;
+			bubble(w ? (w === me ? `You won round ${p.round}!` : `${who(w)} won round ${p.round}!`) : `Round ${p.round} is over`, 'round', 4000);
+			playSound('round'); setParty('round');
+			return;
+		}
+		if (v.round !== p.round) return;
+
+		// new log lines since last time (newest first)
+		const fresh = newLogLines(p.log, v.log);
+		for (const line of [...fresh].reverse()) {
+			const done = /^\{(\d+)\} completed phase (\d+)$/.exec(line);
+			if (done) {
+				const pid = Number(done[1]);
+				bubble(pid === me ? `You completed Phase ${done[2]}!` : `${who(pid)} completed Phase ${done[2]}!`, 'phase', 3200);
+				playSound('phase');
+			}
+			const sk = /^\{(\d+)\} skipped \{(\d+)\}$/.exec(line);
+			if (sk) {
+				const by = Number(sk[1]), target = Number(sk[2]);
+				if (target === me) { bubble(`${who(by)} skipped you`, 'skip', 3000); playSound('skip'); haptic(40); }
+				else bubble(`${who(by)} skipped ${who(target)}`, 'info', 2400);
+			}
+		}
+
+		// discards: the top card changed and it wasn't someone taking it
+		const topNow = v.discard[0], topBefore = p.discard[0];
+		if (topNow && topNow !== topBefore && topNow !== p.discard[1]) {
+			playSound('discard');
+			if (p.turn !== me && p.turn !== null) bubble(`${who(p.turn)} discarded ${label(topNow)}`, 'discard', 2200);
+		}
+	}, [view, me, names, bubble]);
+
+	useEffect(() => { if (!party) return; const t = setTimeout(() => setParty(null), party === 'win' ? 4200 : 2400); return () => clearTimeout(t); }, [party]);
+
 	// keep the selection valid
 	useEffect(() => { if (selected && view && !view.hand.includes(selected)) setSelected(null); }, [view, selected]);
 
 	// haptic tick when your turn starts
 	const myTurn = !!view && view.turn === me;
 	useEffect(() => {
-		if (myTurn && !wasMyTurn.current) { haptic(30); playTurnSound(); }
+		if (myTurn && !wasMyTurn.current) { haptic(30); playTurnSound(); if (prevView.current) bubble('Your turn!', 'turn', 1800); }
 		wasMyTurn.current = myTurn;
 	}, [myTurn]);
 
@@ -179,9 +237,9 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const showRound = !view.finished && view.lastRound && view.lastRound.round === view.round - 1 && seenRound !== view.lastRound.round;
 
 	return (
-		<div className="board">
+		<div className={`board${myTurn && !view.finished ? ' myturn' : ''}${myTurn && step === 'draw' ? ' mustdraw' : ''}`}>
 			{/* Rivals */}
-			<section className="rivals" aria-label="Other players">
+			<section className={`rivals${rivals.length >= 3 ? ' compact' : ''}`} style={{ ['--rc' as string]: rivals.length <= 3 ? rivals.length : rivals.length === 4 ? 2 : 3 }} aria-label="Other players">
 				{rivals.map(r => {
 					const target = myTurn && step === 'skip' && view.skipTargets.includes(r.id);
 					return (
@@ -189,6 +247,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 							role={target ? 'button' : undefined} tabIndex={target ? 0 : undefined} aria-label={target ? `Skip ${nameOf(r.id)}` : undefined}
 							onClick={() => tapRival(r)} onKeyDown={e => { if (e.key === 'Enter') tapRival(r); }}>
 							{r.skipped && <span className="badge pill orange">Skipped next</span>}
+							{view.turn === r.id && !view.finished && <span className="ribbon">{names[r.id]?.isBot ? 'Thinking…' : 'Playing'}</span>}
+							{view.finished?.standings[0].id === r.id && <span className="badge crown-badge"><Crown size={22} title="Winner" /></span>}
 							<div className="top">
 								<img className="av" src={avatar(names[r.id]?.photo || 'na.png')} alt="" />
 								<div className="who">
@@ -295,6 +355,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</button>
 			</footer>
 
+			<Bubbles items={bubbles} allTop={!!view.finished} />
+			{party && <Confetti big={party === 'win'} />}
 			{toast && <div className="toast" role="alert">{toast}</div>}
 			{showRound && view.lastRound && <RoundSheet view={view} nameOf={nameOf} onClose={() => setSeenRound(view.lastRound!.round)} />}
 			{view.finished && <FinishedSheet data={data} view={view} nameOf={nameOf} />}
@@ -307,19 +369,22 @@ function Minis({ cards }: { cards: string[] }) {
 }
 
 function RoundSheet({ view, nameOf, onClose }: { view: GameView; nameOf: (id: number) => string; onClose: () => void }) {
-	useEffect(() => { const t = setTimeout(onClose, 8000); return () => clearTimeout(t); }, [onClose]);
+	// close by itself after 8 s (the board refreshes often, so keep the timer independent of re-renders)
+	const closeRef = useRef(onClose);
+	closeRef.current = onClose;
+	useEffect(() => { const t = setTimeout(() => closeRef.current(), 8000); return () => clearTimeout(t); }, []);
 	const r = view.lastRound!;
 	return (
 		<div className="sheet-backdrop" onClick={onClose}>
 			<div className="sheet" role="dialog" aria-modal="true" aria-label={`Round ${r.round} results`} onClick={e => e.stopPropagation()}>
 				<div className="grabber" />
-				<h2>Round {r.round} done</h2>
+				<h2>{r.wentOut ? <><Crown size={24} /> {nameOf(r.wentOut)} {r.wentOut === view.myId ? 'win' : 'wins'} round {r.round}</> : `Round ${r.round} done`}</h2>
 				<p className="subtitle center">Round {view.round} is dealt. Players who completed their phase move up.</p>
 				<div className="list">
 					{[...r.results].sort((a, b) => a.score - b.score).map(x => (
 						<div key={x.id} className="list-row">
 							<span className="main">
-								<span className="title">{nameOf(x.id)}</span>
+								<span className="title">{nameOf(x.id)}{r.wentOut === x.id && <> <Crown size={16} title="Went out" /></>}</span>
 								<span className="sub">{x.completed ? `Completed phase ${x.phase} ✓` : `Stays on phase ${x.phase}`}</span>
 							</span>
 							<span className="meta">+{x.penalty}<br /><b>{x.score}</b> pts</span>
@@ -343,7 +408,8 @@ function FinishedSheet({ data, view, nameOf }: { data: GameData; view: GameView;
 		<div className="sheet-backdrop">
 			<div className="sheet" role="dialog" aria-modal="true" aria-label="Final standings">
 				<div className="grabber" />
-				<h2>{st[0].id === data.me ? 'You won!' : `${nameOf(st[0].id)} wins`}</h2>
+				<div className="winner-crown"><Crown size={56} title="Winner" /></div>
+				<h2>{st[0].id === data.me ? 'You won!' : `${nameOf(st[0].id)} wins!`}</h2>
 				<p className="subtitle center">{data.practice
 					? 'Practice game with Virtual Friends — no leaderboard points.'
 					: <>You earned <b style={{ color: 'var(--gold)' }}>{myPts}</b> {myPts === 1 ? 'point' : 'points'} for the monthly leaderboard.</>}</p>
@@ -351,7 +417,7 @@ function FinishedSheet({ data, view, nameOf }: { data: GameData; view: GameView;
 					{st.map(s => (
 						<div key={s.id} className={`list-row${s.id === data.me ? ' me' : ''}`}>
 							<span className="rank">{s.rank}</span>
-							<span className="main"><span className="title">{nameOf(s.id)}</span><span className="sub">Phase {s.phase} · {s.score} pts</span></span>
+							<span className="main"><span className="title">{nameOf(s.id)}{s.rank === 1 && <> <Crown size={16} /></>}</span><span className="sub">Phase {s.phase} · {s.score} pts</span></span>
 							{!data.practice && <span className="meta"><b>+{s.points}</b></span>}
 						</div>
 					))}
@@ -463,4 +529,14 @@ function fly(fromSel: string, toSel: string, src: string) {
 	);
 	anim.onfinish = () => img.remove();
 	anim.oncancel = () => img.remove();
+}
+
+/** Log lines added since `before` (logs are newest-first and capped, so align on the old head). */
+function newLogLines(before: string[], after: string[]): string[] {
+	if (!before.length) return after;
+	for (let i = 0; i <= after.length; i++) {
+		const k = Math.min(3, before.length, after.length - i);
+		if (k > 0 && after.slice(i, i + k).every((x, j) => x === before[j])) return after.slice(0, i);
+	}
+	return after;
 }

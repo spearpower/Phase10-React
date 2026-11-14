@@ -304,9 +304,9 @@ button.list-row:active,a.list-row:active{background:var(--tint)}
 .mini{display:block;height:var(--mh);width:var(--mw);flex:0 0 auto;border-radius:calc(var(--mw) * .098);box-shadow:0 1px 2px rgba(0,0,0,.4)}
 .mini + .mini{margin-left:calc(var(--mw) * -0.55)}
 
-.rivals{grid-area:rivals;display:flex;gap:8px;overflow-x:auto;padding:8px 10px 4px;scrollbar-width:none}
+.rivals{grid-area:rivals;display:grid;grid-template-columns:repeat(var(--rc,1),minmax(0,1fr));gap:6px;padding:8px 8px 4px;align-items:start}
 .rivals::-webkit-scrollbar{display:none}
-.rival{flex:1 0 150px;max-width:280px;min-width:140px;display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:16px;
+.rival{min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:16px;
 	background:rgba(4,30,19,.45);box-shadow:inset 0 0 0 1px rgba(246,243,234,.08);text-align:left;color:var(--label);border:0;font:inherit;position:relative}
 .rival .top{display:flex;align-items:center;gap:8px;min-width:0}
 .rival .av{width:34px;height:34px;border-radius:50%;flex:0 0 auto}
@@ -400,3 +400,69 @@ a.profile .chev{margin-left:auto}
 	.mini{animation:pop .22s ease-out}
 	@keyframes pop{from{transform:scale(.7);opacity:.3}to{transform:none;opacity:1}}
 }
+
+/* ---------- Six-player table: compact opponent cards ---------- */
+.rivals.compact .rival{padding:6px;gap:4px;border-radius:12px}
+.rivals.compact .rival .av{width:26px;height:26px}
+.rivals.compact .rival .nm{font-size:12.5px}
+.rivals.compact .rival .st{font-size:11px}
+.rivals.compact .rival .cnt{min-width:24px;padding:4px 5px;font-size:13px}
+.rivals.compact .rival .vf-badge{display:none}
+.rivals.compact .rgroup{--mh:clamp(22px,3.6dvh,32px);min-height:calc(var(--mh) + 6px);padding:3px}
+.rivals.compact .rgroup .lbl{font-size:10px;margin-right:4px}
+.rivals.compact .rival > .st:last-child{display:none}
+
+/* ---------- Whose turn: make it unmistakable ---------- */
+.rival.turn{box-shadow:0 0 0 3px var(--mint),0 0 22px 4px rgba(98,227,172,.45);transform:translateY(-1px)}
+.ribbon{position:absolute;top:-8px;left:8px;padding:2px 8px;border-radius:999px;background:var(--mint);color:#06301F;font-size:10.5px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.crown-badge{position:absolute;top:-14px;right:6px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+.board.myturn::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:40;
+	box-shadow:inset 0 0 0 4px var(--gold),inset 0 0 38px 6px rgba(242,193,78,.35);border-radius:0}
+.board.myturn .hand{background:radial-gradient(80% 90% at 50% 100%,rgba(242,193,78,.18),transparent 70%)}
+.board.myturn .thint.me{font-size:15px;padding:9px 16px;box-shadow:0 0 0 3px rgba(242,193,78,.35),0 6px 16px rgba(0,0,0,.35)}
+
+/* ---------- Bubbles ---------- */
+.bubbles{position:fixed;left:50%;transform:translateX(-50%);z-index:65;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;width:min(92vw,420px)}
+.bubble{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:10px 16px;border-radius:999px;font-weight:700;font-size:15px;line-height:1.25;
+	background:rgba(6,40,26,.94);color:var(--label);box-shadow:0 10px 26px rgba(0,0,0,.45),inset 0 0 0 1px rgba(246,243,234,.12);text-align:center}
+.bubble.turn{background:var(--gold);color:var(--ink);font-size:20px;padding:12px 22px}
+.bubble.phase{background:#0F6B47;box-shadow:0 10px 26px rgba(0,0,0,.45),inset 0 0 0 2px var(--mint)}
+.bubble.discard{font-size:13px;font-weight:600;padding:7px 12px;background:rgba(6,40,26,.85)}
+.bubble.skip{background:#FF8A3D;color:#2A1200}
+.bubble.round{background:linear-gradient(135deg,#F2C14E,#E0A526);color:var(--ink);font-size:18px}
+.bubble.win{background:linear-gradient(135deg,#F2C14E,#E0A526);color:var(--ink);font-size:22px;padding:14px 24px;border-radius:22px}
+.winner-crown{display:flex;justify-content:center;margin-top:-4px}
+.crown{flex:0 0 auto;vertical-align:-3px}
+
+/* ---------- Confetti ---------- */
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:70;overflow:hidden}
+.confetti i{position:absolute;top:-12px;display:block;border-radius:2px;animation-name:fall;animation-timing-function:cubic-bezier(.3,.6,.4,1);animation-fill-mode:forwards}
+@keyframes fall{0%{transform:translateY(0) rotate(0)}100%{transform:translateY(105vh) rotate(720deg);opacity:.9}}
+
+@media (prefers-reduced-motion:no-preference){
+	.bubble{animation:bubbleIn .32s cubic-bezier(.2,.9,.3,1.2)}
+	@keyframes bubbleIn{from{transform:translateY(10px) scale(.85);opacity:0}to{transform:none;opacity:1}}
+	.bubble.win,.bubble.round{animation:bubbleIn .32s cubic-bezier(.2,.9,.3,1.2),glowpulse 1.2s ease-in-out .3s 3}
+	@keyframes glowpulse{50%{box-shadow:0 0 0 6px rgba(242,193,78,.35),0 10px 26px rgba(0,0,0,.45)}}
+	.board.myturn::before{animation:edgepulse 1.6s ease-in-out infinite}
+	@keyframes edgepulse{50%{box-shadow:inset 0 0 0 4px rgba(242,193,78,.55),inset 0 0 18px 2px rgba(242,193,78,.18)}}
+	.winner-crown .crown{animation:crownbob 1.4s ease-in-out infinite}
+	@keyframes crownbob{50%{transform:translateY(-4px) rotate(-4deg)}}
+}
+@media (prefers-reduced-motion:reduce){.confetti{display:none}}
+
+.bubbles.top{top:calc(var(--safe-t) + 8px);gap:6px}
+.bubbles.center{top:calc(var(--safe-t) + 40%)}
+@media (prefers-reduced-motion:no-preference){
+	.bubbles.top .bubble{animation:dropDown .3s cubic-bezier(.2,.9,.3,1.1)}
+	@keyframes dropDown{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
+}
+/* Phone landscape with a full table: smaller opponent cards; their area scrolls if it must */
+@media (orientation:landscape) and (max-height:560px){
+	.rivals{max-height:62dvh;overflow-y:auto;scrollbar-width:none}
+	.rivals.compact .rgroup{--mh:20px;min-height:26px}
+	.rivals.compact .rival .st{font-size:10.5px}
+}
+
+.rgroup{overflow:hidden}
+.rgroup .mini:last-child{margin-right:2px}
