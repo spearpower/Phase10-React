@@ -80,9 +80,10 @@ export function useGame(id: number) {
 	}, [id, refresh]);
 
 	/** Apply a server response from a move immediately (no wait for the next poll). */
-	const accept = useCallback((d: GameData) => {
+	const accept = useCallback((d: Partial<GameData> & { version: number; serverNow: string }) => {
 		skew.current = new Date(d.serverNow).getTime() - Date.now();
-		setData(prev => (prev && prev.version > d.version ? prev : d));
+		// Move responses are partial (no player list): merge into what we have
+		setData(prev => (!prev ? (d as GameData) : prev.version > d.version ? prev : { ...prev, ...d }));
 	}, []);
 
 	return { data, error, refresh, accept, serverNow: () => Date.now() + skew.current };

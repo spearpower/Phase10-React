@@ -216,27 +216,36 @@ export async function startPractice(user: Session, count: number, timerSec: numb
 
 // ---------- Playing ----------
 
-export async function move(user: Session, gameId: number, action: Action): Promise<void> {
-	let changed = false;
-	await sql.begin(async tx => {
-		const g = await lock(tx, gameId);
+export interface MoveResult {
+	changed: boolean; status: string; version: number; deadline: string | null; serverNow: string;
+	nextGameId: number | null; view: GameView | null;
+}
+
+/** Apply one move. Fast path: ~4 database round trips, answered from the saved state (no re-read). */
+export async function move(user: Session, gameId: number, action: Action): Promise<MoveResult> {
+	return sql.begin(async tx => {
+		const g = await lockAsMember(tx, gameId, user.id);
 		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played right now', 409);
-		await member(tx, gameId, user.id);
 		const state = g.state;
+		const before = state.round;
 		if (action.type === 'timeout') {
 			// Any player's device may report the timer; the server decides if it really ran out
-			if (!g.turn_deadline || g.turn_deadline.getTime() > Date.now() + 1000) return;
-			const before = state.round;
+			if (!g.turn_deadline || g.turn_deadline.getTime() > Date.now() + 1000) return result(g, state, user.id, false);
 			runDueTurn(state);
-			await save(tx, g, state, state.round !== before);
 		} else {
-			const before = state.round;
 			apply(state, user.id, action);
-			await save(tx, g, state, state.round !== before);
 		}
-		changed = true;
+		const saved = await save(tx, g, state, state.round !== before);
+		return result({ ...g, ...saved }, state, user.id, true);
 	});
-	if (changed) await ping(gameId);
+}
+
+function result(g: Pick<GameRow, 'status' | 'version' | 'turn_deadline' | 'next_game_id'>, state: GameState, me: number, changed: boolean): MoveResult {
+	return {
+		changed, status: g.status, version: g.version,
+		deadline: g.turn_deadline ? new Date(g.turn_deadline).toISOString() : null,
+		serverNow: new Date().toISOString(), nextGameId: g.next_game_id, view: viewFor(state, me),
+	};
 }
 
 /** Read a player's view. Also records they're online and applies an overdue timeout. */
@@ -309,6 +318,15 @@ async function lock(tx: Tx, gameId: number): Promise<GameRow> {
 	return g;
 }
 
+async function lockAsMember(tx: Tx, gameId: number, userId: number): Promise<GameRow> {
+	const [g] = await tx<(GameRow & { is_member: boolean })[]>`
+		select g.*, exists(select 1 from game_players p where p.game_id = g.id and p.user_id = ${userId}) as is_member
+		from games g where g.id = ${gameId} for update`;
+	if (!g) throw new GameError('Game not found', 404);
+	if (!g.is_member) throw new GameError('You are not in this game', 403);
+	return g;
+}
+
 async function member(tx: Tx, gameId: number, userId: number) {
 	const [m] = await tx`select 1 from game_players where game_id = ${gameId} and user_id = ${userId}`;
 	if (!m) throw new GameError('You are not in this game', 403);
@@ -318,14 +336,14 @@ async function bump(tx: Tx, gameId: number) {
 	await tx`update games set version = version + 1 where id = ${gameId}`;
 }
 
-/** Persist engine state, turn deadline, per-player progress and (at the end) points. */
+/** Persist engine state + turn deadline. Player progress only changes at round end, so it's written only then. */
 async function save(tx: Tx, g: GameRow, state: GameState, newRound: boolean) {
 	const finished = !!state.finished;
 	const extra = newRound ? ROUND_SUMMARY_SECONDS : 0;
 	const secs = finished || !state.turn ? null
 		: isBotTurn(state) ? botSeconds() + extra
 		: g.timer_sec ? g.timer_sec + extra : null;
-	await tx`
+	const [row] = await tx<{ version: number; turn_deadline: Date | null; status: string }[]>`
 		update games set
 			state = ${tx.json(state as never)},
 			status = ${finished ? 'finished' : 'playing'},
@@ -334,20 +352,24 @@ async function save(tx: Tx, g: GameRow, state: GameState, newRound: boolean) {
 			turn_user_id = ${state.turn},
 			turn_deadline = ${secs === null ? null : tx`now() + make_interval(secs => ${secs})`},
 			finished_at = ${finished ? tx`now()` : null}
-		where id = ${g.id}`;
-	for (const id of state.order) {
-		const p = state.players[String(id)];
-		const rank = state.finished?.standings.find(s => s.id === id)?.rank ?? null;
-		await tx`update game_players set phase = ${p.phase}, score = ${p.score}, final_rank = ${rank}
-			where game_id = ${g.id} and user_id = ${id}`;
+		where id = ${g.id}
+		returning version, turn_deadline, status`;
+	if (newRound || finished) {
+		const rows = state.order.map(id => {
+			const p = state.players[String(id)];
+			return { uid: id, phase: p.phase, score: p.score, rank: state.finished?.standings.find(x => x.id === id)?.rank ?? null };
+		});
+		await tx`
+			update game_players as gp set phase = v.phase, score = v.score, final_rank = v.rank
+			from jsonb_to_recordset(${tx.json(rows as never)}) as v(uid bigint, phase int, score int, rank int)
+			where gp.game_id = ${g.id} and gp.user_id = v.uid`;
 	}
 	// Games with Virtual Friends are practice: no leaderboard points
 	if (state.finished && !state.bots?.length) {
-		for (const s of state.finished.standings) {
-			await tx`insert into game_points (user_id, game_id, points) values (${s.id}, ${g.id}, ${s.points})
-				on conflict (game_id, user_id) do nothing`;
-		}
+		const pts = state.finished.standings.map(x => ({ user_id: x.id, game_id: g.id, points: x.points }));
+		await tx`insert into game_points ${tx(pts, 'user_id', 'game_id', 'points')} on conflict (game_id, user_id) do nothing`;
 	}
+	return row;
 }
 
 async function ping(gameId: number) {

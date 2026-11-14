@@ -21,7 +21,11 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const { data, error: loadError, accept, serverNow, refresh } = useGame(id);
 	const [selected, setSelected] = useState<string | null>(null);
 	const [toast, setToast] = useState('');
-	const [busy, setBusy] = useState(false);
+	const [optimistic, setOptimistic] = useState<GameView | null>(null);
+	const queue = useRef<Promise<void>>(Promise.resolve());
+	const inflight = useRef(0);
+	const [fresh, setFresh] = useState<string[]>([]);     // cards that just arrived in the hand
+	const prevHand = useRef<string[] | null>(null);
 	const [sort, setSort] = useState<Sort>('number');
 	const [seenRound, setSeenRound] = useState(0);
 	const [left, setLeft] = useState<number | null>(null);
@@ -30,7 +34,10 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const [sound, setSound] = useState(true);
 	useEffect(() => { initSound(); setSound(soundOn()); }, []);
 
-	const view = data?.view ?? null;
+	// What we show: the server's view, or our prediction while moves are on their way
+	const view = optimistic ?? data?.view ?? null;
+	const viewRef = useRef<GameView | null>(null);
+	viewRef.current = view;
 	const me = data?.me ?? 0;
 	const names = useMemo(() => Object.fromEntries((data?.players || []).map(p => [p.id, p])), [data?.players]);
 	const nameOf = useCallback((pid: number) => (pid === me ? 'You' : names[pid]?.username || 'Player'), [names, me]);
@@ -40,6 +47,17 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		if (!data) return;
 		if (data.status === 'lobby') router.replace(`/lobby/${id}`);
 	}, [data, id, router]);
+
+	// briefly highlight cards that just arrived (drawn)
+	useEffect(() => {
+		const h = view?.hand;
+		if (!h) return;
+		if (prevHand.current) {
+			const added = h.filter(c => !prevHand.current!.includes(c) && c !== PENDING);
+			if (added.length) { setFresh(added); const t = setTimeout(() => setFresh([]), 700); prevHand.current = h; return () => clearTimeout(t); }
+		}
+		prevHand.current = h;
+	}, [view?.hand]);
 
 	// keep the selection valid
 	useEffect(() => { if (selected && view && !view.hand.includes(selected)) setSelected(null); }, [view, selected]);
@@ -69,16 +87,27 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	const say = (msg: string) => { setToast(msg); haptic(8); setTimeout(() => setToast(t => (t === msg ? '' : t)), 2600); };
 
-	const send = useCallback(async (action: Action) => {
-		if (busy) return;
-		setBusy(true);
-		try {
-			const d = await api<GameData>(`/api/games/${id}/move`, action);
-			accept(d);
-			setSelected(null);
-		} catch (e) { say((e as Error).message); refresh(); }
-		finally { setBusy(false); }
-	}, [busy, id, accept, refresh]);
+	/** Show the predicted result now, send the move in order, and reconcile with the server's answer. */
+	const send = useCallback((action: Action) => {
+		const cur = viewRef.current;
+		const predicted = cur ? predict(cur, me, action) : null;
+		if (predicted) setOptimistic(predicted);
+		setSelected(null);
+		inflight.current++;
+		queue.current = queue.current.then(async () => {
+			try {
+				const d = await api<GameData>(`/api/games/${id}/move`, action);
+				accept(d);
+			} catch (e) {
+				inflight.current = 1; // drop the rest of this burst: it was based on the refused move
+				say((e as Error).message);
+				await refresh();
+			} finally {
+				inflight.current = Math.max(0, inflight.current - 1);
+				if (inflight.current === 0) setOptimistic(null);
+			}
+		});
+	}, [id, me, accept, refresh]);
 
 	if (!data || !view) {
 		return (
@@ -112,11 +141,19 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	}
 
 	// ----- actions -----
-	const tapDeck = () => { if (myTurn && step === 'draw') send({ type: 'draw', from: 'deck' }); else if (myTurn) say(step === 'skip' ? 'Choose a player to skip first' : 'You’ve already drawn — now play or discard'); else say('Wait for your turn'); };
+	const tapDeck = () => { if (myTurn && step === 'draw') { fly('[data-drop="deck"]', '.hand', '/cards/back.svg'); send({ type: 'draw', from: 'deck' }); } else if (myTurn) say(step === 'skip' ? 'Choose a player to skip first' : 'You’ve already drawn — now play or discard'); else say('Wait for your turn'); };
 	const tapDiscard = () => {
 		if (!myTurn) return say('Wait for your turn');
-		if (step === 'draw') { if (top && isSkip(top)) return say('A Skip can’t be taken — draw from the deck'); return send({ type: 'draw', from: 'discard' }); }
-		if (step === 'play') { if (!selected) return say('Tap a card in your hand first'); return send({ type: 'discard', card: selected }); }
+		if (step === 'draw') {
+			if (top && isSkip(top)) return say('A Skip can’t be taken — draw from the deck');
+			if (top) fly('[data-drop="discard"]', '.hand', cardSrc(top));
+			return send({ type: 'draw', from: 'discard' });
+		}
+		if (step === 'play') {
+			if (!selected) return say('Tap a card in your hand first');
+			fly(`[data-card="${selected}"]`, '[data-drop="discard"]', cardSrc(selected));
+			return send({ type: 'discard', card: selected });
+		}
 		say('Choose a player to skip first');
 	};
 	const tapMyGroup = (g: number) => {
@@ -124,6 +161,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		if (mine.done && !canPlay) return say('You can add to groups on your turn, after drawing');
 		const end = fitEnd(mine.conditions[g], mine.groups?.[g] || [], selected);
 		if (!end) return say('That card doesn’t fit there');
+		fly(`[data-card="${selected}"]`, `[data-drop="g${g}"]`, cardSrc(selected));
 		send({ type: 'place', card: selected, group: g, end });
 	};
 	const tapRivalGroup = (r: PlayerView, g: number) => {
@@ -132,6 +170,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		if (!mine.done) return say('Lay down your own phase first');
 		const end = fitEnd(r.conditions[g], r.groups?.[g] || [], selected);
 		if (!end) return say('That card doesn’t fit there');
+		fly(`[data-card="${selected}"]`, `[data-drop="r${r.id}-${g}"]`, cardSrc(selected));
 		send({ type: 'hit', target: r.id, group: g, card: selected, end });
 	};
 	const tapRival = (r: PlayerView) => { if (myTurn && step === 'skip' && view.skipTargets.includes(r.id)) send({ type: 'skip', target: r.id }); };
@@ -161,7 +200,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 							{r.done && r.groups && (
 								<div className="rgroups">
 									{r.conditions.map((c, g) => (
-										<button key={g} type="button" className={`rgroup${selected && canPlay && mine.done ? ' can-drop' : ''}`}
+										<button key={g} type="button" data-drop={`r${r.id}-${g}`} className={`rgroup${selected && canPlay && mine.done ? ' can-drop' : ''}`}
 											onClick={e => { e.stopPropagation(); tapRivalGroup(r, g); }} aria-label={`${nameOf(r.id)}: ${conditionLabel(c)}`}>
 											<span className="lbl">{conditionLabel(c)}</span>
 											<Minis cards={r.groups![g]} />
@@ -183,14 +222,14 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</div>
 				<div className="piles">
 					<div className="pilewrap">
-						<button type="button" className={`pile${!top ? ' empty' : ''}${myTurn && step === 'draw' && top && !isSkip(top) ? ' go' : ''}${canPlay && selected ? ' drop' : ''}`}
+						<button type="button" data-drop="discard" className={`pile${!top ? ' empty' : ''}${myTurn && step === 'draw' && top && !isSkip(top) ? ' go' : ''}${canPlay && selected ? ' drop' : ''}`}
 							onClick={tapDiscard} aria-label={top ? `Discard pile, top card ${label(top)}` : 'Discard pile, empty'}>
-							{top && <img src={cardSrc(top)} alt="" />}
+							{top && <img key={top} className="drop-in" src={cardSrc(top)} alt="" />}
 						</button>
 						<span className="pile-label">Discard</span>
 					</div>
 					<div className="pilewrap">
-						<button type="button" className={`pile${myTurn && step === 'draw' ? ' go' : ''}`} onClick={tapDeck} aria-label={`Deck, ${view.deckCount} cards`}>
+						<button type="button" data-drop="deck" className={`pile${myTurn && step === 'draw' ? ' go' : ''}`} onClick={tapDeck} aria-label={`Deck, ${view.deckCount} cards`}>
 							<img src="/cards/back.svg" alt="" />
 							<span className="count">{view.deckCount}</span>
 						</button>
@@ -209,7 +248,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 						return (
 							<div key={g} className={`mgroup${mine.done ? ' done' : ''}${selected && (!mine.done || canPlay) ? ' can-drop' : ''}`}>
 								<span className="lbl">{conditionLabel(c)} {ok && !mine.done ? '✓' : ''}</span>
-								<button type="button" className="cards" onClick={() => tapMyGroup(g)} aria-label={`${conditionLabel(c)}: ${cards.length ? cards.map(label).join(', ') : 'empty'}`}>
+								<button type="button" className="cards" data-drop={`g${g}`} onClick={() => tapMyGroup(g)} aria-label={`${conditionLabel(c)}: ${cards.length ? cards.map(label).join(', ') : 'empty'}`}>
 									{cards.length ? <Minis cards={cards} /> : <span className="empty-msg">{selected ? 'Tap to place' : 'Empty'}</span>}
 								</button>
 							</div>
@@ -220,8 +259,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 			{/* Actions */}
 			<div className="actions">
-				{!mine.done && <button type="button" className="icon-btn gold" disabled={!canPlay || !allMet || busy} onClick={() => send({ type: 'layDown' })}>Lay Down</button>}
-				{staged && <button type="button" className="icon-btn" disabled={busy} onClick={() => send({ type: 'unstage' })}>Take Back</button>}
+				{!mine.done && <button type="button" className="icon-btn gold" disabled={!canPlay || !allMet} onClick={() => send({ type: 'layDown' })}>Lay Down</button>}
+				{staged && <button type="button" className="icon-btn" onClick={() => send({ type: 'unstage' })}>Take Back</button>}
 				<button type="button" className="icon-btn" onClick={() => setSort(s => (s === 'number' ? 'colour' : s === 'colour' ? 'dealt' : 'number'))} aria-label={`Sort hand, now by ${sort}`}>
 					Sort: {sort === 'number' ? '1–12' : sort === 'colour' ? 'Colour' : 'As dealt'}
 				</button>
@@ -229,9 +268,12 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 			{/* Hand */}
 			<section className="hand" style={{ ['--n' as string]: hand.length }} aria-label={`Your hand, ${hand.length} cards`}>
-				{hand.map(c => (
-					<button key={c} type="button" className={`card${selected === c ? ' sel' : ''}`} aria-pressed={selected === c} aria-label={label(c)}
-						onClick={() => { haptic(6); setSelected(s => (s === c ? null : c)); }}>
+				{hand.map(c => c === PENDING ? (
+					<span key={c} className="card pending" aria-label="Drawing a card…"><img src="/cards/back.svg" alt="" /></span>
+				) : (
+					<button key={c} type="button" data-card={c} className={`card${selected === c ? ' sel' : ''}${fresh.includes(c) ? ' arrive' : ''}`} aria-pressed={selected === c} aria-label={label(c)}
+						onPointerDown={() => { haptic(6); setSelected(sel => (sel === c ? null : c)); }}
+						onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(sel => (sel === c ? null : c)); } }}>
 						<img src={cardSrc(c)} alt="" />
 					</button>
 				))}
@@ -350,4 +392,75 @@ function fitEnd(cond: Condition, group: string[], card: string): 'end' | 'start'
 	if (placeInGroup(cond.type, group, card, 'end')) return 'end';
 	if (placeInGroup(cond.type, group, card, 'start')) return 'start';
 	return null;
+}
+
+/** Placeholder for a card being drawn from the deck (its face is unknown until the server answers). */
+const PENDING = '0??';
+
+/** Predict the visible result of my move, so the card moves at once. The server's answer replaces it. */
+function predict(v: GameView, me: number, a: Action): GameView | null {
+	const n: GameView = { ...v, hand: [...v.hand], discard: [...v.discard], players: v.players.map(p => ({ ...p, groups: p.groups ? p.groups.map(g => [...g]) : null })) };
+	const mine = n.players.find(p => p.id === me);
+	if (!mine) return null;
+	const take = (c: string) => { const i = n.hand.indexOf(c); if (i >= 0) n.hand.splice(i, 1); };
+	const nextAfter = () => n.order[(n.order.indexOf(me) + 1) % n.order.length];
+	switch (a.type) {
+		case 'draw':
+			if (a.from === 'discard') { const top = n.discard.shift(); if (top) n.hand.push(top); }
+			else { n.hand.push(PENDING); n.deckCount = Math.max(0, n.deckCount - 1); }
+			n.step = 'play';
+			return n;
+		case 'discard': {
+			take(a.card);
+			n.discard = [a.card, ...n.discard].slice(0, 3);
+			const targets = n.players.filter(p => p.id !== me && !p.skipped).map(p => p.id);
+			if (a.card[1] === 's' && targets.length && n.hand.length) { n.step = 'skip'; n.skipTargets = targets; }
+			else { n.turn = nextAfter(); n.step = 'draw'; n.skipTargets = []; }
+			return n;
+		}
+		case 'place':
+			take(a.card);
+			if (mine.groups) mine.groups[a.group] = a.end === 'start' ? [a.card, ...mine.groups[a.group]] : [...mine.groups[a.group], a.card];
+			return n;
+		case 'hit': {
+			take(a.card);
+			const t = n.players.find(p => p.id === a.target);
+			if (t?.groups) t.groups[a.group] = a.end === 'start' ? [a.card, ...t.groups[a.group]] : [...t.groups[a.group], a.card];
+			return n;
+		}
+		case 'unstage':
+			if (mine.groups) { n.hand.push(...mine.groups.flat()); mine.groups = mine.groups.map(() => []); }
+			return n;
+		case 'layDown':
+			mine.done = true;
+			return n;
+		case 'skip':
+			n.turn = nextAfter(); n.step = 'draw'; n.skipTargets = [];
+			return n;
+		default:
+			return null;
+	}
+}
+
+/** Animate a card image flying from one element to another (skipped when reduced motion is on). */
+function fly(fromSel: string, toSel: string, src: string) {
+	if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+	const from = document.querySelector(fromSel), to = document.querySelector(toSel);
+	if (!from || !to) return;
+	const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+	const img = document.createElement('img');
+	img.src = src; img.className = 'flyer'; img.alt = '';
+	Object.assign(img.style, { left: `${a.left}px`, top: `${a.top}px`, width: `${a.width}px`, height: `${a.height}px` });
+	document.body.appendChild(img);
+	// land on the right-hand end of the hand, or the centre of a pile / group
+	const intoHand = toSel === '.hand';
+	const tx = (intoHand ? b.right - a.width - 12 : b.left + b.width / 2 - a.width / 2) - a.left;
+	const ty = (intoHand ? b.bottom - a.height - 6 : b.top + b.height / 2 - a.height / 2) - a.top;
+	const scale = intoHand ? 1 : Math.max(0.45, Math.min(1, b.height / a.height));
+	const anim = img.animate(
+		[{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${tx}px, ${ty}px) scale(${scale})` }],
+		{ duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' },
+	);
+	anim.onfinish = () => img.remove();
+	anim.oncancel = () => img.remove();
 }

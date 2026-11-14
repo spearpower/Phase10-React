@@ -1,5 +1,7 @@
+import { after } from 'next/server';
 import { body, fail, json, withUser } from '@/lib/http';
-import { getGame, move } from '@/lib/games';
+import { move } from '@/lib/games';
+import { notifyGame } from '@/lib/realtime';
 import { Action } from '@/lib/engine';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -27,6 +29,8 @@ export const POST = withUser(async (user, req: Request, ctx: Ctx) => {
 	const { id } = await ctx.params;
 	const action = parse(await body<Record<string, unknown>>(req) as Record<string, unknown>);
 	if (!action) return fail('That move isn’t valid');
-	await move(user, Number(id), action);
-	return json(await getGame(user, Number(id)));
+	const r = await move(user, Number(id), action);
+	// Tell the other players after we've answered: the mover never waits for the broadcast
+	if (r.changed) after(() => notifyGame(Number(id), r.version));
+	return json(r);
 });
