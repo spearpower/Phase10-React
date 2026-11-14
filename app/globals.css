@@ -145,7 +145,8 @@ img{max-width:100%}
 .row-link .row-title{display:block;font-weight:600}
 .row-link .row-sub{display:block}
 .row-link .row-sub{font-size:14px;color:var(--label-2)}
-.row-link .chev{width:8px;height:14px;fill:none;stroke:var(--label-3);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+/* disclosure arrow: sized everywhere it's used (list rows, profile card) */
+.chev{width:8px;height:14px;flex:0 0 auto;fill:none;stroke:var(--label-3);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 
 /* Profile header on Home */
 .profile{display:flex;align-items:center;gap:14px;padding:16px;background:var(--surface);border-radius:var(--radius);margin-bottom:20px}
