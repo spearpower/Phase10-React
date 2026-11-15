@@ -391,12 +391,14 @@ export interface MoveResult {
 
 /** Apply one move. Fast path: ~4 database round trips, answered from the saved state (no re-read). */
 export async function move(user: Session, gameId: number, action: Action): Promise<MoveResult> {
+	const { orderShuffle } = await getSettings(); // cached; applies to games already being played
 	return sql.begin(async tx => {
 		const g = await lockAsMember(tx, gameId, user.id);
 		if (g.status === 'ended') throw new GameError('This game was ended', 409);
 		if (g.status !== 'playing' || !g.state) throw new GameError('This game is not being played right now', 409);
 		const state = g.state;
 		const before = state.round;
+		state.shuffleOrder = orderShuffle;
 		if (action.type === 'timeout') {
 			// Any player's device may report the timer; the server decides if it really ran out
 			if (!g.turn_deadline || g.turn_deadline.getTime() > Date.now() + 1000) return result(g, state, user.id, false);
@@ -436,6 +438,7 @@ export async function getGame(user: Session, gameId: number) {
 			if (locked.status !== 'playing' || !locked.state || !locked.turn_deadline || locked.turn_deadline.getTime() >= Date.now() - grace(locked)) return;
 			const before = locked.state.round;
 			const timedOut = locked.state.turn;
+			locked.state.shuffleOrder = (await getSettings()).orderShuffle;
 			runDueTurn(locked.state);
 			await saveAfterTimeout(tx, locked, locked.state, timedOut, before);
 			changed = true;

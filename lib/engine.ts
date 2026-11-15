@@ -45,6 +45,8 @@ export interface GameState {
 	bots?: number[];                       // Virtual Friends at this table (played by lib/bot.ts)
 	botLevel?: BotLevel;                   // how well the Virtual Friends play (default normal)
 	missed?: Record<string, number>;       // turns in a row each person ran out of time
+	shuffleOrder?: boolean;                // admin "Order Shuffle": new seating order every round
+	orderShuffledRound?: number;           // the round whose order was just shuffled (for the round summary)
 }
 
 export type Action =
@@ -87,7 +89,25 @@ export function newGame(edition: number, playerIds: number[], phases: Record<str
 	return s;
 }
 
+/** Same playing order? Orders are circles: [A,B,C] and [B,C,A] are the same order. */
+export function sameCircle(a: number[], b: number[]): boolean {
+	if (a.length !== b.length) return false;
+	const i = b.indexOf(a[0]);
+	return i >= 0 && a.every((x, k) => x === b[(i + k) % b.length]);
+}
+
+/** A new seating order in which players sit next to different people (3+ players). */
+export function newCircle(order: number[]): number[] {
+	let next = shuffle([...order]);
+	for (let tries = 0; tries < 12 && sameCircle(order, next); tries++) next = shuffle([...order]);
+	return next;
+}
+
 export function dealRound(s: GameState): void {
+	if (s.shuffleOrder && s.round > 0 && s.order.length >= 3) {
+		s.order = newCircle(s.order);
+		s.orderShuffledRound = s.round + 1;
+	}
 	s.round += 1;
 	s.reshuffles = 0;
 	const deck = newDeck();
@@ -370,6 +390,7 @@ export interface GameView {
 	skipTargets: number[];
 	lastRound: GameState['lastRound'];
 	finished: GameState['finished'];
+	orderShuffled: boolean;            // this round was dealt with a new playing order
 	log: string[];
 	maxPhase: number;
 }
@@ -404,6 +425,7 @@ export function viewFor(s: GameState, me: number): GameView {
 		skipTargets: s.turn === me && s.step === 'skip' ? skipTargets(s, me) : [],
 		lastRound: s.lastRound,
 		finished: s.finished,
+		orderShuffled: s.orderShuffledRound === s.round,
 		log: s.log,
 		maxPhase: s.maxPhase,
 	};

@@ -729,3 +729,8 @@ a.icon-btn{text-decoration:none}
 .peek-card.newest{box-shadow:0 0 0 3px var(--gold),0 8px 20px rgba(0,0,0,.5)}
 .peek-caption{position:fixed;left:0;right:0;text-align:center;font-size:13px;font-weight:600;color:var(--label);text-shadow:0 1px 3px rgba(0,0,0,.6);transition:opacity .2s}
 @media (prefers-reduced-motion:reduce){.peek-card{transition:none}}
+
+/* Order Shuffle: new playing order in the round summary */
+.new-order{display:grid;gap:4px;margin:0 0 12px;padding:10px 14px;border-radius:12px;background:rgba(127,211,255,.12);border:1px solid rgba(127,211,255,.45);font-size:14px;text-align:center}
+.new-order b{color:#9FDFFF}
+.new-order span{color:var(--label);font-weight:600}

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import { Chevron, ErrorBanner, NavBar, Skeleton } from '@/components/ui';
 
-interface Settings { virtualFriends: boolean; voiceChat: boolean; voiceReady: boolean; missing?: { voice: string[]; alerts: string[]; dailyJob: string[] } }
+interface Settings { virtualFriends: boolean; voiceChat: boolean; orderShuffle: boolean; voiceReady: boolean; missing?: { voice: string[]; alerts: string[]; dailyJob: string[] } }
 
 export default function AdminPage() {
 	const [s, setS] = useState<Settings | null>(null);
@@ -14,14 +14,16 @@ export default function AdminPage() {
 
 	useEffect(() => { api<Settings>('/api/admin/settings').then(setS).catch(e => setError(e.message)); }, []);
 
-	async function toggle(key: 'virtualFriends' | 'voiceChat', on: boolean) {
+	async function toggle(key: 'virtualFriends' | 'voiceChat' | 'orderShuffle', on: boolean) {
 		if (!s) return;
 		const before = s;
 		setS({ ...s, [key]: on }); setError(''); setSaved('');
 		try {
 			const next = await api<Settings>('/api/admin/settings', { [key]: on });
 			setS(next);
-			setSaved(key === 'virtualFriends'
+			setSaved(key === 'orderShuffle'
+				? (next.orderShuffle ? 'Order Shuffle is on: every new round gets a new playing order, in games already running too' : 'Order Shuffle is off: players keep their seats all game')
+				: key === 'virtualFriends'
 				? (next.virtualFriends ? 'Virtual Friends are on for everyone' : 'Virtual Friends are off for everyone')
 				: (next.voiceChat ? 'Voice chat is on: players can talk at their tables' : 'Voice chat is off'));
 		} catch (e) { setError((e as Error).message); setS(before); }
@@ -56,6 +58,11 @@ export default function AdminPage() {
 							<span className="switch"><input id="vf" type="checkbox" role="switch" checked={s.virtualFriends} onChange={e => toggle('virtualFriends', e.target.checked)} /><span /></span>
 						</div>
 						<p className="hint">Practice games against computer players, Quick Game filling, and adding them to empty seats. Games already in progress keep playing.</p>
+						<div className="switch-row">
+							<label htmlFor="shuffle">Order Shuffle</label>
+							<span className="switch"><input id="shuffle" type="checkbox" role="switch" checked={s.orderShuffle} onChange={e => toggle('orderShuffle', e.target.checked)} /><span /></span>
+						</div>
+						<p className="hint">Each new round is dealt with a new playing order, so players play before or after different people than in the last round. Applies straight away, also to games being played. Tables of 2 just alternate, as always.</p>
 						<div className="switch-row">
 							<label htmlFor="voice">Voice chat at tables</label>
 							<span className="switch"><input id="voice" type="checkbox" role="switch" checked={s.voiceChat} disabled={!s.voiceReady && !s.voiceChat} onChange={e => toggle('voiceChat', e.target.checked)} /><span /></span>

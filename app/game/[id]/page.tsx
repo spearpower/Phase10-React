@@ -105,6 +105,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		if (v.round > p.round && v.lastRound && v.lastRound.round === p.round) {
 			const w = v.lastRound.wentOut;
 			bubble(w ? (w === me ? `You won round ${p.round}!` : `${who(w)} won round ${p.round}!`) : `Round ${p.round} is over`, 'round', 4000);
+			if (v.orderShuffled) setTimeout(() => bubble('🔀 New playing order this round', 'info', 3200), 900);
 			playSound('round'); setParty('round');
 			return;
 		}
@@ -559,6 +560,12 @@ function RoundSheet({ view, nameOf, onClose }: { view: GameView; nameOf: (id: nu
 				<div className="grabber" />
 				<h2>{r.wentOut ? <><Crown size={24} /> {nameOf(r.wentOut)} {r.wentOut === view.myId ? 'win' : 'wins'} round {r.round}</> : `Round ${r.round} done`}</h2>
 				<p className="subtitle center">Round {view.round} is dealt. Players who completed their phase move up.</p>
+				{view.orderShuffled && (
+					<div className="new-order" role="status">
+						<b>🔀 New playing order</b>
+						<span>{rotate(view.order, view.myId).map(id => nameOf(id)).join(' → ')} → …</span>
+					</div>
+				)}
 				<div className="list">
 					{[...r.results].sort((a, b) => a.score - b.score).map(x => (
 						<div key={x.id} className="list-row">

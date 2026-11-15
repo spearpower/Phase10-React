@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isRunInOrder, isValidGroup, placeInGroup, meetsCondition, Condition } from './rules';
-import { apply, autoPlay, AWAY_TURNS, awayPlayer, countCards, GameError, GameState, newGame, removePlayer, viewFor } from './engine';
+import { apply, autoPlay, AWAY_TURNS, awayPlayer, countCards, endRound, GameError, GameState, newGame, removePlayer, sameCircle, viewFor } from './engine';
 import { penalty } from './cards';
 
 const CLASSIC: Record<string, Condition[]> = {
@@ -270,5 +270,47 @@ describe('full games (bots)', () => {
 			if (Math.random() < 0.02) autoPlay(s); else botTurn(s);
 			expect(countCards(s)).toBe(108);
 		}
+	});
+});
+
+describe('Order Shuffle (admin switch)', () => {
+	it('off: the playing order stays the same every round', () => {
+		const s = newGame(1, [1, 2, 3, 4], CLASSIC);
+		const first = [...s.order];
+		for (let r = 0; r < 5; r++) endRound(s, null);
+		expect(s.order).toEqual(first);
+		expect(viewFor(s, 1).orderShuffled).toBe(false);
+	});
+	for (const n of [3, 4, 6]) {
+		it(`on, ${n} players: every new round has a different circle, all cards accounted for`, () => {
+			const s = newGame(1, Array.from({ length: n }, (_, i) => i + 1), CLASSIC);
+			s.shuffleOrder = true;
+			for (let r = 0; r < 8; r++) {
+				const before = [...s.order];
+				endRound(s, null);
+				expect(sameCircle(before, s.order), `round ${s.round}: ${before} -> ${s.order}`).toBe(false);
+				expect([...s.order].sort()).toEqual([...before].sort());
+				expect(countCards(s)).toBe(108);
+				expect(viewFor(s, 1).orderShuffled).toBe(true);
+				expect(s.order).toContain(s.turn);
+			}
+		});
+	}
+	it('2 players: nothing to shuffle', () => {
+		const s = newGame(1, [1, 2], CLASSIC);
+		s.shuffleOrder = true;
+		endRound(s, null);
+		expect(viewFor(s, 1).orderShuffled).toBe(false);
+	});
+	it('sameCircle treats rotations as the same order', () => {
+		expect(sameCircle([1, 2, 3], [2, 3, 1])).toBe(true);
+		expect(sameCircle([1, 2, 3], [1, 3, 2])).toBe(false);
+	});
+	it('bots finish a full game with Order Shuffle on', { timeout: 60000 }, () => {
+		const s = newGame(1, [1, 2, 3, 4], EASY);
+		s.shuffleOrder = true;
+		let t = 0;
+		while (!s.finished && t < 20000) { botTurn(s); expect(countCards(s)).toBe(108); t++; }
+		expect(s.finished).not.toBeNull();
 	});
 });
