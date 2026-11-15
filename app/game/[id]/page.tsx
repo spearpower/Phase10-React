@@ -687,23 +687,33 @@ function predict(v: GameView, me: number, a: Action): GameView | null {
 	}
 }
 
-/** Animate a card image flying from one element to another (skipped when reduced motion is on). */
+/** Animate a card image flying from one element to another (skipped when reduced motion is on).
+ * The flying card is always card-sized: when it starts or lands on a player's box, it uses the pile's card size
+ * and starts/ends at the centre of that box. */
 function fly(fromSel: string, toSel: string, src: string, duration = 280) {
 	if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 	const from = document.querySelector(fromSel), to = document.querySelector(toSel);
 	if (!from || !to) return;
 	const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+	const cardLike = (r: DOMRect) => r.width > 0 && r.width / r.height < 0.9;
+	const pile = document.querySelector('[data-drop="deck"]')?.getBoundingClientRect();
+	// size of the flying card: the source card, else the destination card, else a pile card
+	const size = cardLike(a) ? { w: a.width, h: a.height } : cardLike(b) ? { w: b.width, h: b.height } : pile ? { w: pile.width, h: pile.height } : { w: 60, h: 81 };
+	const startX = a.left + a.width / 2 - size.w / 2, startY = a.top + a.height / 2 - size.h / 2;
 	const img = document.createElement('img');
 	img.src = src; img.className = 'flyer'; img.alt = '';
-	Object.assign(img.style, { left: `${a.left}px`, top: `${a.top}px`, width: `${a.width}px`, height: `${a.height}px` });
+	Object.assign(img.style, { left: `${startX}px`, top: `${startY}px`, width: `${size.w}px`, height: `${size.h}px` });
 	document.body.appendChild(img);
-	// land on the right-hand end of the hand, or the centre of a pile / group
+	// land on the right-hand end of the hand, or the centre of a pile / group / player box
 	const intoHand = toSel === '.hand';
-	const tx = (intoHand ? b.right - a.width - 12 : b.left + b.width / 2 - a.width / 2) - a.left;
-	const ty = (intoHand ? b.bottom - a.height - 6 : b.top + b.height / 2 - a.height / 2) - a.top;
-	const scale = intoHand ? 1 : Math.max(0.45, Math.min(1, b.height / a.height));
+	const tx = (intoHand ? b.right - size.w - 12 : b.left + b.width / 2 - size.w / 2) - startX;
+	const ty = (intoHand ? b.bottom - size.h - 6 : b.top + b.height / 2 - size.h / 2) - startY;
+	const startScale = cardLike(a) ? 1 : 0.55;                       // leaving a player's box: starts small
+	const endScale = intoHand ? 1 : cardLike(b) ? Math.max(0.45, Math.min(1, b.height / size.h)) : 0.55; // into a player's box: shrinks
 	const anim = img.animate(
-		[{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${tx}px, ${ty}px) scale(${scale})` }],
+		[{ transform: `translate(0,0) scale(${startScale})`, opacity: cardLike(a) ? 1 : 0.4 },
+		 { transform: `translate(${tx * 0.5}px, ${ty * 0.5}px) scale(${(startScale + endScale) / 2 + 0.1})`, opacity: 1, offset: 0.5 },
+		 { transform: `translate(${tx}px, ${ty}px) scale(${endScale})`, opacity: cardLike(b) || intoHand ? 1 : 0.4 }],
 		{ duration, easing: 'cubic-bezier(.2,.8,.2,1)' },
 	);
 	anim.onfinish = () => img.remove();
