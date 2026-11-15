@@ -32,3 +32,13 @@ async function setSwitch(key: Key, enabled: boolean, adminId: number): Promise<A
 export const setVirtualFriends = (enabled: boolean, adminId: number) => setSwitch('virtual_friends', enabled, adminId);
 export const setVoiceChat = (enabled: boolean, adminId: number) => setSwitch('voice_chat', enabled, adminId);
 export const voiceConfigured = () => !!(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
+
+/** Names (never values) of server settings that are missing, grouped by feature — shown to admins. */
+export function missingServerSettings(): Record<'voice' | 'alerts' | 'dailyJob', string[]> {
+	const miss = (names: string[]) => names.filter(n => !(process.env[n] || '').trim());
+	return {
+		voice: miss(['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']),
+		alerts: miss(['NEXT_PUBLIC_VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY']),
+		dailyJob: miss(['CRON_SECRET']),
+	};
+}

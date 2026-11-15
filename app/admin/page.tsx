@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import { Chevron, ErrorBanner, NavBar, Skeleton } from '@/components/ui';
 
-interface Settings { virtualFriends: boolean; voiceChat: boolean; voiceReady: boolean }
+interface Settings { virtualFriends: boolean; voiceChat: boolean; voiceReady: boolean; missing?: { voice: string[]; alerts: string[]; dailyJob: string[] } }
 
 export default function AdminPage() {
 	const [s, setS] = useState<Settings | null>(null);
@@ -62,8 +62,14 @@ export default function AdminPage() {
 						</div>
 						<p className="hint">{s.voiceReady
 							? 'Players at the same table can talk (LiveKit, free plan). Each person taps the microphone to join; nobody is heard without choosing to.'
-							: 'Voice chat needs the LiveKit keys in the server settings first.'}</p>
+							: <>Voice chat can’t be switched on yet: the server is missing <b>{(s.missing?.voice || []).join(', ') || 'the LiveKit settings'}</b>. Add them in Vercel → Settings → Environment Variables (tick Production), then Redeploy.</>}</p>
 					</>
+				)}
+				{s?.missing && (s.missing.alerts.length > 0 || s.missing.dailyJob.length > 0) && (
+					<div className="error-banner" role="status" style={{ marginTop: 14 }}>
+						Server settings missing:{s.missing.alerts.length > 0 && <> phone alerts need <b>{s.missing.alerts.join(', ')}</b>;</>}
+						{s.missing.dailyJob.length > 0 && <> the daily job needs <b>{s.missing.dailyJob.join(', ')}</b>;</>} add them in Vercel (Production) and Redeploy.
+					</div>
 				)}
 				{saved && <div className="ok-banner" role="status">{saved}</div>}
 				<ErrorBanner>{error}</ErrorBanner>
