@@ -734,3 +734,17 @@ a.icon-btn{text-decoration:none}
 .new-order{display:grid;gap:4px;margin:0 0 12px;padding:10px 14px;border-radius:12px;background:rgba(127,211,255,.12);border:1px solid rgba(127,211,255,.45);font-size:14px;text-align:center}
 .new-order b{color:#9FDFFF}
 .new-order span{color:var(--label);font-weight:600}
+
+/* Privacy policy + delete account */
+.policy{font-size:16px;line-height:1.55;color:var(--label)}
+.policy h2{margin:26px 0 8px;font-size:20px;color:var(--gold)}
+.policy h3{margin:16px 0 6px;font-size:16px;color:var(--label)}
+.policy p{margin:0 0 12px}
+.policy ul{margin:0 0 12px;padding-left:20px}
+.policy li{margin:5px 0}
+.legal{margin:16px 0 0;text-align:center;font-size:14px;color:var(--label-2)}
+.legal a{color:var(--gold);font-weight:600}
+.section-title.danger-zone{color:var(--danger)}
+.btn.delete-account{margin-bottom:12px}
+.delete-list{margin:0 0 14px;padding-left:20px;font-size:15px;line-height:1.45;color:var(--label-2)}
+.delete-list li{margin:5px 0}

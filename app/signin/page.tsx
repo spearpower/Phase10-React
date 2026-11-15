@@ -1,12 +1,14 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import { ErrorBanner } from '@/components/ui';
 
 export default function SignInPage() {
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
+	const [deleted, setDeleted] = useState(false);
+	useEffect(() => { setDeleted(new URLSearchParams(location.search).get('deleted') === '1'); }, []);
 
 	async function submit(e: React.FormEvent<HTMLFormElement>) {
 		e.preventDefault();
@@ -44,6 +46,7 @@ export default function SignInPage() {
 					<div style={{ marginTop: 20 }}>
 						<button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Signing In…' : 'Sign In'}</button>
 					</div>
+					{deleted && <div className="ok-banner" role="status">Your account has been deleted. Thanks for playing Rummy10.</div>}
 					<ErrorBanner>{error}</ErrorBanner>
 					<details className="forgot">
 						<summary>Forgot your password?</summary>
@@ -53,6 +56,7 @@ export default function SignInPage() {
 						<Link href="/signup" className="btn btn-plain">New here? Create an Account</Link>
 					</div>
 				</form>
+				<p className="legal"><Link href="/privacy">Privacy Policy</Link></p>
 			</main>
 		</div>
 	);

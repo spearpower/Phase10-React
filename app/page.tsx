@@ -74,6 +74,11 @@ export default async function PlayPage() {
 						<span className="row-text"><span className="row-title">How to Play</span><span className="row-sub">The 10 phases, special cards and scoring</span></span>
 						<Chevron />
 					</Link>
+					<Link className="row-link" href="/privacy">
+						<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3Z" /><path d="M9.5 12l1.8 1.8 3.4-3.6" /></svg></span>
+						<span className="row-text"><span className="row-title">Privacy Policy</span><span className="row-sub">What we keep and why</span></span>
+						<Chevron />
+					</Link>
 				</nav>
 			</main>
 			<TabBar />

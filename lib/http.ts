@@ -4,6 +4,13 @@ import { COOKIE, readSession, Session } from './session';
 import { GameError } from './engine';
 import { sql } from './db';
 
+/** 401 that also clears the sign-in cookie (deleted or suspended accounts), so pages don't bounce back and forth. */
+function signedOut(message: string): Response {
+	const res = fail(message, 401);
+	res.cookies.set(COOKIE, '', { path: '/', maxAge: 0 });
+	return res;
+}
+
 /** Per-instance cache of "account is fine" (active, no forced password change), refreshed every minute. */
 const okUntil = new Map<number, number>();
 export const forgetAccountCheck = (id: number) => okUntil.delete(id);
@@ -14,14 +21,17 @@ async function accountCheck(user: Session, path: string): Promise<Response | nul
 	// signed in with a temporary password: the cookie says so, no database needed
 	if (user.mustChange && !passwordRoute) return fail('Choose a new password first', 428);
 	if ((okUntil.get(user.id) || 0) > Date.now()) return null;
-	const [row] = await sql<{ status: string; must_change_password: boolean }[]>`
-		update users set last_seen_at = now() where id = ${user.id} returning status, must_change_password`.catch(() => [] as never[]);
-	if (!row) return null; // database hiccup or column missing: don't lock people out
-	if (row.status !== 'active') return fail('This account is suspended. Contact the admin.', 401);
+	let failed = false;
+	const [row] = await sql<{ status: string; must_change_password: boolean; username: string }[]>`
+		update users set last_seen_at = now() where id = ${user.id} returning status, must_change_password, username`.catch(() => { failed = true; return [] as never[]; });
+	if (failed) return null; // database hiccup or column missing: don't lock people out
+	if (!row) return signedOut('This account no longer exists');
+	if (row.username === `Deleted${user.id}`) return signedOut('This account no longer exists');
+	if (row.status !== 'active') return signedOut('This account is suspended. Contact the admin.');
 	if (row.must_change_password && !passwordRoute) {
 		return fail('Choose a new password first', 428);
 	}
-	if (!row.must_change_password) okUntil.set(user.id, Date.now() + 60000);
+	if (!row.must_change_password) okUntil.set(user.id, Date.now() + 15000); // suspend / delete reach other phones within 15 s
 	return null;
 }
 

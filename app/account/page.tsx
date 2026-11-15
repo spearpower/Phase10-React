@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import AlertsSwitch from '@/components/AlertsSwitch';
+import DeleteAccount from '@/components/DeleteAccount';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import { AVATARS, avatarUrl } from '@/lib/avatars';
@@ -130,6 +131,11 @@ export default function AccountPage() {
 						<span className="row-text"><span className="row-title">How to Play</span><span className="row-sub">Phases, special cards and scoring</span></span>
 						<Chevron />
 					</Link>
+					<Link className="row-link" href="/privacy">
+						<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3Z" /><path d="M9.5 12l1.8 1.8 3.4-3.6" /></svg></span>
+						<span className="row-text"><span className="row-title">Privacy Policy</span><span className="row-sub">What we keep, who sees it, deleting your account</span></span>
+						<Chevron />
+					</Link>
 				</nav>
 
 				{(acc.role === 'admin' || acc.role === 'superadmin') && (
@@ -148,6 +154,10 @@ export default function AccountPage() {
 				<div style={{ marginTop: 24 }}>
 					<button className="btn btn-plain" type="button" onClick={async () => { await api('/api/auth/signout', {}); window.location.href = '/signin'; }}>Sign Out</button>
 				</div>
+
+				<div className="section-title danger-zone">Delete account</div>
+				<p className="hint" style={{ marginTop: 0 }}>Permanently delete your Rummy10 account and your personal data.</p>
+				<DeleteAccount superAdmin={acc.role === 'superadmin'} />
 			</main>
 			<TabBar />
 		</div>

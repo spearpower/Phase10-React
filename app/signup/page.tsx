@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/client';
 import { ErrorBanner, NavBar } from '@/components/ui';
@@ -43,7 +44,8 @@ export default function SignUpPage() {
 						<div className="field"><label htmlFor="repassword">Confirm password</label>
 							<input name="repassword" id="repassword" type="password" placeholder="Type it again" autoComplete="new-password" required /></div>
 					</div>
-					<div style={{ marginTop: 24 }}>
+					<p className="legal" style={{ textAlign: 'left', marginTop: 14 }}>By creating an account you agree to how Rummy10 handles your data, as set out in the <Link href="/privacy">Privacy Policy</Link>.</p>
+					<div style={{ marginTop: 14 }}>
 						<button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create Account'}</button>
 					</div>
 					<ErrorBanner>{error}</ErrorBanner>

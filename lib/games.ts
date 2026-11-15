@@ -569,3 +569,64 @@ async function ping(gameId: number) {
 	const [g] = await sql<{ version: number }[]>`select version from games where id = ${gameId}`;
 	if (g) await notifyGame(gameId, g.version);
 }
+
+// ---------- Delete my account ----------
+
+/**
+ * Deletes a player's account. Personal data goes (profile, password, chat, points, friends, invites, alerts).
+ * A player who never played is deleted completely; otherwise the row stays as an anonymous "Deleted<id>" so
+ * other players' finished games keep making sense. Running games carry on without them.
+ */
+export async function deleteAccount(user: Session, password: string, confirm: string): Promise<{ removed: 'deleted' | 'anonymised'; games: number[] }> {
+	if (confirm.trim().toUpperCase() !== 'DELETE') throw new GameError('Type DELETE to confirm');
+	const touched: number[] = [];
+	const removed = await sql.begin(async tx => {
+		const [u] = await tx<{ ok: boolean; role: string; is_bot: boolean }[]>`
+			select app_check_password(${password}, password_hash) as ok, role, is_bot from users where id = ${user.id} for update`;
+		if (!u || u.is_bot) throw new GameError('Account not found', 404);
+		if (!u.ok) throw new GameError('That password isn’t right', 403);
+		if (u.role === 'superadmin') throw new GameError('The super admin account can’t be deleted. Make someone else super admin first.', 409);
+
+		// games in play: leave like any player (the others carry on); waiting rooms: close or leave
+		const seats = await tx<{ game_id: number; status: string; host_id: number }[]>`
+			select g.id as game_id, g.status, g.host_id from game_players p join games g on g.id = p.game_id
+			where p.user_id = ${user.id} and p.left_at is null and g.status in ('playing', 'lobby')`;
+		for (const s of seats) {
+			const g = await lock(tx, s.game_id);
+			if (g.status === 'playing' && g.state?.players[String(user.id)]) {
+				await takeOut(tx, g, user.id, user.id, 'Account deleted', 'left the game · Account deleted');
+			} else if (g.status === 'lobby') {
+				if (g.host_id === user.id) await tx`update games set status = 'abandoned' where id = ${g.id}`;
+				else await tx`delete from game_players where game_id = ${g.id} and user_id = ${user.id}`;
+				await bump(tx, g.id);
+			}
+			touched.push(s.game_id);
+		}
+
+		// personal content
+		await tx`delete from game_messages where user_id = ${user.id}`;
+		await tx`delete from game_points where user_id = ${user.id}`;
+		await tx`delete from friendships where requester_id = ${user.id} or addressee_id = ${user.id}`;
+		await tx`delete from game_invites where from_id = ${user.id} or to_id = ${user.id}`;
+		await tx`delete from push_subscriptions where user_id = ${user.id}`;
+		await tx`update app_settings set updated_by = null where updated_by = ${user.id}`;
+
+		const [{ shared }] = await tx<{ shared: boolean }[]>`
+			select exists(select 1 from game_players where user_id = ${user.id} or left_by = ${user.id})
+			    or exists(select 1 from games where host_id = ${user.id} or turn_user_id = ${user.id} or ended_by = ${user.id}) as shared`;
+		if (!shared) {
+			await tx`delete from users where id = ${user.id}`;
+			return 'deleted' as const;
+		}
+		await tx`
+			update users set username = ${'Deleted' + user.id}, fullname = '', email = null, phone = null, photo = 'na.png',
+				password_hash = app_hash_password(${crypto.randomUUID()}), status = 'suspended', role = 'player',
+				must_change_password = false, last_seen_at = null, last_login_at = null
+			where id = ${user.id}`;
+		return 'anonymised' as const;
+	});
+	for (const id of touched) await ping(id);
+	if (touched.length) await notifyLobbyList();
+	console.log('[account]', JSON.stringify({ action: 'delete', id: user.id, removed }));
+	return { removed, games: touched };
+}
