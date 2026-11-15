@@ -722,3 +722,10 @@ a.profile .chev{margin-left:auto}
 
 .live-row .title{white-space:normal;overflow:visible;line-height:1.35}
 a.icon-btn{text-decoration:none}
+
+/* Discard pile spread (tap when there's nothing to do, or press and hold) */
+.peek-backdrop{position:fixed;inset:0;z-index:88;background:rgba(3,22,14,.35)}
+.peek-card{position:fixed;border-radius:8%;box-shadow:0 8px 20px rgba(0,0,0,.5);transition:transform .32s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.peek-card.newest{box-shadow:0 0 0 3px var(--gold),0 8px 20px rgba(0,0,0,.5)}
+.peek-caption{position:fixed;left:0;right:0;text-align:center;font-size:13px;font-weight:600;color:var(--label);text-shadow:0 1px 3px rgba(0,0,0,.6);transition:opacity .2s}
+@media (prefers-reduced-motion:reduce){.peek-card{transition:none}}

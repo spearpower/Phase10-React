@@ -50,6 +50,9 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	useEffect(() => { initSound(); setSound(soundOn()); try { localStorage.setItem('rummy10.playedOnce', '1'); } catch { /* ignore */ } }, []);
 	const [bubbles, setBubbles] = useState<Bubble[]>([]);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [peek, setPeek] = useState<null | { x: number; y: number; w: number; h: number; cards: string[] }>(null);
+	const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const longPressed = useRef(false);
 	const [voiceOn, setVoiceOn] = useState(false);
 	useEffect(() => { api<{ voiceChat: boolean }>('/api/settings').then(s => setVoiceOn(!!s.voiceChat)).catch(() => {}); }, []);
 	const [party, setParty] = useState<null | 'round' | 'win'>(null);
@@ -130,11 +133,32 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			}
 		}
 
+		// other players' draws: a card back flies from the deck, or the real card from the discard pile, to their seat
+		let delay = 0, lastDrawer: number | null = null;
+		const pile = [...p.discard]; // what was on the discard pile, top first
+		for (const line of [...fresh].reverse()) {
+			const d = /^\{(\d+)\} (drew from the deck|took from the discard pile)$/.exec(line);
+			if (!d) continue;
+			const pid = Number(d[1]);
+			lastDrawer = pid;
+			const fromDeck = d[2] === 'drew from the deck';
+			const card = fromDeck ? null : pile.shift() || null;
+			if (pid === me) continue; // my own draws animate when I tap
+			const at = delay;
+			setTimeout(() => fly(fromDeck ? '[data-drop="deck"]' : '[data-drop="discard"]', `[data-seat="${pid}"]`, card ? cardSrc(card) : '/cards/back.svg', 520), at);
+			if (card) bubble(`${who(pid)} took ${label(card)}`, 'discard', 2200);
+			delay += 600;
+		}
+
 		// discards: the top card changed and it wasn't someone taking it
 		const topNow = v.discard[0], topBefore = p.discard[0];
 		if (topNow && topNow !== topBefore && topNow !== p.discard[1]) {
 			playSound('discard');
-			if (p.turn !== me && p.turn !== null) bubble(`${who(p.turn)} discarded ${label(topNow)}`, 'discard', 2200);
+			const by = lastDrawer ?? p.turn;
+			if (by !== me && by !== null) {
+				bubble(`${who(by)} discarded ${label(topNow)}`, 'discard', 2200);
+				setTimeout(() => fly(`[data-seat="${by}"]`, '[data-drop="discard"]', cardSrc(topNow), 480), delay + (delay ? 150 : 0));
+			}
 		}
 	}, [view, me, names, bubble]);
 
@@ -291,8 +315,17 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	// ----- actions -----
 	const tapDeck = () => { if (myTurn && step === 'draw') { fly('[data-drop="deck"]', '.hand', '/cards/back.svg'); send({ type: 'draw', from: 'deck' }); } else if (myTurn) say(step === 'skip' ? 'Choose a player to skip first' : 'You’ve already drawn — now play or discard'); else say('Wait for your turn'); };
+	/** Spread the last discards for 2 seconds (they were all thrown face up, so everyone has seen them). */
+	const openPeek = () => {
+		const el = document.querySelector('[data-drop="discard"]');
+		if (!el || !view.discard.length) return;
+		const r = el.getBoundingClientRect();
+		haptic(10);
+		setPeek({ x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, cards: [...view.discard].reverse() });
+	};
 	const tapDiscard = () => {
-		if (!myTurn) return say('Wait for your turn');
+		if (longPressed.current) { longPressed.current = false; return; } // the long press already opened the spread
+		if (!myTurn || (step === 'play' && !selected)) return openPeek();
 		if (step === 'draw') {
 			if (top && isSkip(top)) return say('A Skip can’t be taken — draw from the deck');
 			if (top) fly('[data-drop="discard"]', '.hand', cardSrc(top));
@@ -386,7 +419,11 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				<div className="piles">
 					<div className="pilewrap">
 						<button type="button" data-drop="discard" className={`pile${!top ? ' empty' : ''}${myTurn && step === 'draw' && top && !isSkip(top) ? ' go' : ''}${canPlay && selected ? ' drop' : ''}${tip?.pile === 'discard' ? ' hinted' : ''}`}
-							onClick={tapDiscard} aria-label={top ? `Discard pile, top card ${label(top)}` : 'Discard pile, empty'}>
+							onClick={tapDiscard} aria-label={top ? `Discard pile, top card ${label(top)}. Press and hold to see the cards underneath.` : 'Discard pile, empty'}
+							onPointerDown={() => { longPressed.current = false; pressTimer.current = setTimeout(() => { longPressed.current = true; openPeek(); }, 450); }}
+							onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+							onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+							onContextMenu={e => e.preventDefault()}>
 							{top && <img key={top} className="drop-in" src={cardSrc(top)} alt="" />}
 						</button>
 						<span className="pile-label">Discard</span>
@@ -489,6 +526,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 					</div>
 				</>
 			)}
+			{peek && <DiscardSpread peek={peek} onClose={() => setPeek(null)} />}
 			{floats.map(f => <span key={f.key} className="float-emoji" style={{ left: f.x, top: f.y }} aria-hidden="true">{f.emoji}</span>)}
 			<Bubbles items={bubbles} allTop={!!view.finished} />
 			{party && <Confetti big={party === 'win'} />}
@@ -619,7 +657,7 @@ function predict(v: GameView, me: number, a: Action): GameView | null {
 			return n;
 		case 'discard': {
 			take(a.card);
-			n.discard = [a.card, ...n.discard].slice(0, 3);
+			n.discard = [a.card, ...n.discard].slice(0, 8);
 			const targets = n.players.filter(p => p.id !== me && !p.skipped).map(p => p.id);
 			if (a.card[1] === 's' && targets.length && n.hand.length) { n.step = 'skip'; n.skipTargets = targets; }
 			else { n.turn = nextAfter(); n.step = 'draw'; n.skipTargets = []; }
@@ -650,7 +688,7 @@ function predict(v: GameView, me: number, a: Action): GameView | null {
 }
 
 /** Animate a card image flying from one element to another (skipped when reduced motion is on). */
-function fly(fromSel: string, toSel: string, src: string) {
+function fly(fromSel: string, toSel: string, src: string, duration = 280) {
 	if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 	const from = document.querySelector(fromSel), to = document.querySelector(toSel);
 	if (!from || !to) return;
@@ -666,7 +704,7 @@ function fly(fromSel: string, toSel: string, src: string) {
 	const scale = intoHand ? 1 : Math.max(0.45, Math.min(1, b.height / a.height));
 	const anim = img.animate(
 		[{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${tx}px, ${ty}px) scale(${scale})` }],
-		{ duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' },
+		{ duration, easing: 'cubic-bezier(.2,.8,.2,1)' },
 	);
 	anim.onfinish = () => img.remove();
 	anim.oncancel = () => img.remove();
@@ -706,6 +744,40 @@ function EndedSheet({ data, nameOf }: { data: GameData; nameOf: (id: number) => 
 					{error && <div className="error-banner">{error}</div>}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+/** The discard pile fanned out: newest on the right, back to a stack after 2 seconds (or a tap). */
+function DiscardSpread({ peek, onClose }: { peek: { x: number; y: number; w: number; h: number; cards: string[] }; onClose: () => void }) {
+	const [open, setOpen] = useState(false);
+	const closeRef = useRef(onClose);
+	closeRef.current = onClose;
+	useEffect(() => {
+		const a = requestAnimationFrame(() => setOpen(true));            // fan out
+		const t1 = setTimeout(() => setOpen(false), 2000);                // gather back
+		const t2 = setTimeout(() => closeRef.current(), 2350);
+		return () => { cancelAnimationFrame(a); clearTimeout(t1); clearTimeout(t2); };
+	}, []);
+	const n = peek.cards.length;
+	const w = Math.min(peek.w, 74), h = w / 0.737;
+	const vw = typeof window === 'undefined' ? 390 : window.innerWidth;
+	const step = Math.min(w * 0.62, (vw - 32 - w) / Math.max(1, n - 1));
+	const span = step * (n - 1);
+	const left = Math.max(16, Math.min(vw - 16 - span - w, peek.x - span / 2 - w / 2)) ;
+	return (
+		<div className="peek-backdrop" onClick={onClose} role="dialog" aria-label="Discard pile, newest on the right">
+			<div className="sr-only" aria-live="polite">Discard pile, oldest to newest: {peek.cards.map(label).join(', ')}</div>
+			{peek.cards.map((c, i) => {
+				const fanX = left + i * step - (peek.x - w / 2);
+				const rot = (i - (n - 1) / 2) * 3;
+				return (
+					<img key={c + i} className={`peek-card${i === n - 1 ? ' newest' : ''}`} src={cardSrc(c)} alt=""
+						style={{ left: peek.x - w / 2, top: peek.y - h / 2, width: w, height: h, zIndex: 90 + i,
+							transform: open ? `translate(${fanX}px, -8px) rotate(${rot}deg)` : 'translate(0,0) rotate(0deg)' }} />
+				);
+			})}
+			<div className="peek-caption" style={{ top: peek.y + h / 2 + 10, opacity: open ? 1 : 0 }}>Last {n} {n === 1 ? 'card' : 'cards'} · newest on the right</div>
 		</div>
 	);
 }

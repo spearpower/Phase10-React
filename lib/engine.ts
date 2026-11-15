@@ -374,6 +374,9 @@ export interface GameView {
 	maxPhase: number;
 }
 
+/** How many discards players can see when they spread the pile (they all saw them being thrown). */
+export const PEEK_CARDS = 8;
+
 export function viewFor(s: GameState, me: number): GameView {
 	const mine = s.players[String(me)];
 	return {
@@ -397,7 +400,7 @@ export function viewFor(s: GameState, me: number): GameView {
 			};
 		}),
 		deckCount: s.deck.length,
-		discard: s.discard.slice(0, 3),
+		discard: s.discard.slice(0, PEEK_CARDS),   // top first; tapping the pile spreads these
 		skipTargets: s.turn === me && s.step === 'skip' ? skipTargets(s, me) : [],
 		lastRound: s.lastRound,
 		finished: s.finished,
