@@ -101,6 +101,7 @@ New features sometimes need database changes. These live in `db/migrations/` and
 | `001_virtual_friends_accounts.sql` | Virtual Friends (6 computer players), the `app_settings` table (admin switches), `users.is_bot` |
 | `002_game_chat.sql` | `game_messages`: the table chat (public messages and emojis per game) |
 | `003_manage_players.sql` | the `superadmin` role (given to `gero`), leaving or removing players with a reason, ending games with a reason (`ended` status) |
+| `004_mvp_batch.sql` | admin password resets (`must_change_password`), `last_seen_at`, friends, table invites, phone-alert subscriptions |
 
 To make someone an admin, run `update users set role = 'admin' where lower(username) = lower('their-name');`. The **Admin** link then appears on their Account page.
 
@@ -112,3 +113,16 @@ To make someone an admin, run `update users set role = 'admin' where lower(usern
 5. Every client re-fetches `GET /api/games/:id`, which returns only what that player may see.
 
 **Turn timer:** the deadline is stored in `games.turn_deadline`. A player's device reports `timeout` when its countdown hits zero, and the server checks the clock before auto-playing. If nobody reports it, the next read of that game applies it. No always-on server is needed, which is why this fits Vercel.
+
+
+## Settings added with the MVP batch (004)
+
+Add these in Vercel → Project → Settings → Environment Variables (Production), then redeploy:
+
+| Name | What it is |
+|---|---|
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Phone alerts (Web Push). Free; the key pair is generated once (see `.env.example`). |
+| `CRON_SECRET` | Protects the daily job `/api/cron/daily` (vercel.json `crons`, 03:00 UTC): keeps Supabase awake, closes stuck games, clears old invites. Vercel sends it automatically. |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Voice chat (LiveKit Cloud, free Build plan with a hard cap). Voice stays off until an admin switches it on in Admin. |
+
+Phone alerts on iPhone need iOS 16.4+ and Rummy10 added to the Home Screen.

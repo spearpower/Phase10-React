@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/http';
 import { NavBar, TabBar, Chevron } from '@/components/ui';
 import SignOutButton from '@/components/SignOutButton';
+import QuickGameButton from '@/components/QuickGameButton';
+import PlayExtras from '@/components/PlayExtras';
 import { getSettings } from '@/lib/settings';
 import { avatarUrl } from '@/lib/avatars';
 import { sql } from '@/lib/db';
@@ -22,6 +24,8 @@ export default async function PlayPage() {
 				<h1 className="large-title">Play</h1>
 				<p className="subtitle">Get 2–6 friends together and race through the 10 phases.</p>
 
+				<PlayExtras />
+
 				<Link href="/account" className="profile" aria-label="Your account" style={{ color: 'inherit', textDecoration: 'none' }}>
 					<img className="avatar" src={avatarUrl(me?.photo || user.photo)} alt="" />
 					<div className="who">
@@ -35,6 +39,7 @@ export default async function PlayPage() {
 					<svg className="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
 					Host a Game
 				</Link>
+				<QuickGameButton friends={virtualFriends} />
 
 				<div className="section-title">Join</div>
 				<nav className="group" aria-label="Join or continue">

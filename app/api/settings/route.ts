@@ -1,4 +1,7 @@
 import { json, withUser } from '@/lib/http';
-import { getSettings } from '@/lib/settings';
+import { getSettings, voiceConfigured } from '@/lib/settings';
 
-export const GET = withUser(async () => json(await getSettings()));
+export const GET = withUser(async () => {
+	const s = await getSettings();
+	return json({ ...s, voiceChat: s.voiceChat && voiceConfigured() });
+});

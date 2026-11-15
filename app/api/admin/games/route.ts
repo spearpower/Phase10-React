@@ -14,7 +14,7 @@ export const GET = withUser(async user => {
 	const staleBefore = Date.now() - STALE_HOURS * 3600 * 1000;
 	return json({
 		superAdmin: role === 'superadmin', staleHours: STALE_HOURS, serverNow: new Date().toISOString(),
-		tables: rows.map(r => ({ ...r, stale: new Date(r.updated_at).getTime() < staleBefore })),
+		tables: rows.map(r => ({ ...r, stale: r.status === 'playing' && new Date(r.updated_at).getTime() < staleBefore })),
 	});
 });
 

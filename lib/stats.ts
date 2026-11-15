@@ -1,9 +1,11 @@
 // Player stats and game history, worked out from game_players / games / game_points (no extra columns).
 import { sql } from './db';
 import { GameError } from './engine';
+import { titles } from './fame';
 
 export interface PlayerStats {
 	user: { id: number; username: string; photo: string };
+	titles: number;
 	games: number; wins: number; winRate: number; avgPlace: number | null;
 	bestStreak: number; streak: number; points: number;
 	practiceGames: number; practiceWins: number;
@@ -46,6 +48,7 @@ export async function playerStats(userId: number): Promise<PlayerStats> {
 
 	return {
 		user: { id: user.id, username: user.username, photo: user.photo },
+		titles: (await titles())[user.id] || 0,
 		games: real.length, wins,
 		winRate: real.length ? Math.round((wins / real.length) * 100) : 0,
 		avgPlace: real.length ? Math.round((real.reduce((s, r) => s + r.final_rank, 0) / real.length) * 10) / 10 : null,

@@ -12,8 +12,8 @@ export const END_REASONS = ['Time’s up', 'Players left', 'Network problems', '
 interface Person { id: number; username: string; photo: string; isBot?: boolean; left?: boolean }
 type Step = { kind: 'menu' } | { kind: 'pick' } | { kind: 'rules' } | { kind: 'reason'; action: 'leave' | 'remove' | 'end'; target?: Person };
 
-export default function TableMenu({ gameId, me, canManage, players, inGame, onClose, onDone }: {
-	gameId: number; me: number; canManage: boolean; players: Person[]; inGame: boolean;
+export default function TableMenu({ gameId, me, canManage, players, inGame, onClose, onDone, edition = 1 }: {
+	gameId: number; me: number; canManage: boolean; players: Person[]; inGame: boolean; edition?: number;
 	onClose: () => void; onDone: (what: 'left' | 'removed' | 'ended') => void;
 }) {
 	const [step, setStep] = useState<Step>({ kind: 'menu' });
@@ -70,7 +70,7 @@ export default function TableMenu({ gameId, me, canManage, players, inGame, onCl
 				{step.kind === 'rules' && (
 					<>
 						<h2>How to play</h2>
-						<div className="sheet-scroll"><HowToPlay /></div>
+						<div className="sheet-scroll"><HowToPlay edition={edition} /></div>
 						<button className="btn btn-plain" type="button" onClick={() => setStep({ kind: 'menu' })} style={{ marginTop: 10 }}>Back</button>
 					</>
 				)}

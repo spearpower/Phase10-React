@@ -45,6 +45,10 @@ export default function SignInPage() {
 						<button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Signing In…' : 'Sign In'}</button>
 					</div>
 					<ErrorBanner>{error}</ErrorBanner>
+					<details className="forgot">
+						<summary>Forgot your password?</summary>
+						<p>Ask an admin to reset it. They’ll give you a temporary password; sign in with it and you’ll choose a new one straight away.</p>
+					</details>
 					<div style={{ marginTop: 16 }}>
 						<Link href="/signup" className="btn btn-plain">New here? Create an Account</Link>
 					</div>

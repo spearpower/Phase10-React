@@ -1,11 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, avatar, useGame } from '@/lib/client';
 import { ErrorBanner, NavBar, Skeleton } from '@/components/ui';
 import PinSheet from '@/components/PinSheet';
 import { LEVELS } from '@/lib/levels';
+import { ruleSet } from '@/lib/rulesets';
+import InviteFriends from '@/components/InviteFriends';
 
 const TIMERS = [0, 20, 30, 40, 60];
 
@@ -18,9 +20,34 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [pinOpen, setPinOpen] = useState(false);
+	const [inviteOpen, setInviteOpen] = useState(false);
 	const [copied, setCopied] = useState(false);
 	const [vfOn, setVfOn] = useState(false);
 	useEffect(() => { api<{ virtualFriends: boolean }>('/api/settings').then(s => setVfOn(s.virtualFriends)).catch(() => {}); }, []);
+
+	// Quick Game: if nobody joins within 30 s, fill the empty seats with Virtual Friends and start
+	const [quick, setQuick] = useState(false);
+	const [countdown, setCountdown] = useState<number | null>(null);
+	const quickAt = useRef<number | null>(null);
+	const quickFired = useRef(false);
+	useEffect(() => { setQuick(new URLSearchParams(location.search).get('quick') === '1'); }, []);
+	const someoneJoined = !!data && data.players.some(p => p.id !== data.me && !p.isBot);
+	const quickOn = quick && vfOn && !!data && data.status === 'lobby' && data.me === data.hostId && !someoneJoined;
+	useEffect(() => {
+		if (!quickOn) { setCountdown(null); return; }
+		if (quickAt.current === null) quickAt.current = Date.now() + 30000;
+		const tick = () => {
+			const left = Math.max(0, Math.ceil((quickAt.current! - Date.now()) / 1000));
+			setCountdown(left);
+			if (left === 0 && !quickFired.current) {
+				quickFired.current = true;
+				api(`/api/games/${id}/quickstart`, {}).then(() => router.replace(`/game/${id}`)).catch(e => { setError((e as Error).message); quickFired.current = false; setQuick(false); });
+			}
+		};
+		tick();
+		const t = setInterval(tick, 250);
+		return () => clearInterval(t);
+	}, [quickOn, id, router]);
 
 	useEffect(() => { if (data?.status === 'playing' && data.isMember) router.replace(`/game/${id}`); }, [data, id, router]);
 	useEffect(() => { if (data) setTimer(t => (data.timerSec && t === 40 ? data.timerSec : t)); }, [data]);
@@ -59,8 +86,16 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 			<main>
 				<div className="lobby-head">
 					<div className="stat"><div className="k">Game number</div><div className="v">{id}</div></div>
+					<div className="stat"><div className="k">Rules</div><div className="v" style={{ fontSize: 20 }}>{ruleSet(data.edition).name}</div></div>
 					<div className="stat"><div className="k">PIN</div><div className="v">{data.isMember ? (data.pin || <span className="code-none">None</span>) : (data.private ? '••••' : <span className="code-none">None</span>)}</div></div>
 				</div>
+				{countdown !== null && (
+					<div className="quick-wait" role="status">
+						<div className="ring" style={{ ['--p' as string]: `${(countdown / 30) * 100}%` }}><span>{countdown}</span></div>
+						<div className="txt"><b>Looking for players…</b><br />Virtual Friends fill the empty seats in {countdown}s and the game starts.</div>
+						<button type="button" className="icon-btn" onClick={() => setQuick(false)}>Wait</button>
+					</div>
+				)}
 				<p className="footnote" role="status">
 					{!data.isMember ? 'You’re not at this table yet.' : isHost ? 'Share the game number or tap Invite. You need at least 2 players.' : 'You’re in. The game starts when the host taps Start.'}
 				</p>
@@ -92,6 +127,9 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 					))}
 				</div>
 
+				{data.isMember && (
+					<button type="button" className="btn btn-invite" onClick={() => setInviteOpen(true)}>👥 Invite Friends</button>
+				)}
 				{data.isMember && (
 					<div className="share-row">
 						<button type="button" className="btn-share wa" onClick={whatsapp}>
@@ -146,6 +184,7 @@ export default function LobbyPage({ params }: { params: Promise<{ id: string }> 
 					<ErrorBanner>{error || loadError}</ErrorBanner>
 				</div></div>
 			</main>
+			{inviteOpen && <InviteFriends gameId={id} onClose={() => setInviteOpen(false)} />}
 			{pinOpen && <PinSheet gameId={id} onClose={() => setPinOpen(false)} onSubmit={async pin => { await api(`/api/games/${id}/join`, { pin }); setPinOpen(false); await refresh(); }} />}
 		</div>
 	);

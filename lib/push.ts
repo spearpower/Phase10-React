@@ -1,0 +1,67 @@
+// Phone alerts (Web Push). Free: uses VAPID keys, no third-party service.
+// Every send is best effort: alerts never break or slow down a move.
+import webpush from 'web-push';
+import { sql } from './db';
+
+export interface PushPayload { title: string; body: string; url: string; tag?: string }
+
+let ready: boolean | null = null;
+function configure(): boolean {
+	if (ready !== null) return ready;
+	const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY, priv = process.env.VAPID_PRIVATE_KEY;
+	ready = !!(pub && priv);
+	if (ready) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://phase10-react.vercel.app', pub!, priv!);
+	return ready;
+}
+export const pushConfigured = () => configure();
+
+/** Send to every phone these players allowed alerts on. Never throws. */
+export async function notifyUsers(userIds: number[], payload: PushPayload): Promise<number> {
+	if (!userIds.length || !configure()) return 0;
+	let sent = 0;
+	try {
+		const subs = await sql<{ endpoint: string; p256dh: string; auth: string }[]>`
+			select endpoint, p256dh, auth from push_subscriptions where user_id in ${sql(userIds)}`;
+		await Promise.all(subs.map(async s => {
+			try {
+				await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 900, urgency: 'high', topic: payload.tag?.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) });
+				sent++;
+			} catch (e) {
+				const code = (e as { statusCode?: number }).statusCode;
+				if (code === 404 || code === 410) await sql`delete from push_subscriptions where endpoint = ${s.endpoint}`.catch(() => {});
+				else console.error('[push]', code, (e as Error).message);
+			}
+		}));
+	} catch (e) { console.error('[push]', (e as Error).message); }
+	return sent;
+}
+
+export async function saveSubscription(userId: number, sub: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }) {
+	if (!sub?.endpoint || !/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) throw new Error('Bad subscription');
+	await sql`
+		insert into push_subscriptions (endpoint, user_id, p256dh, auth) values (${sub.endpoint.slice(0, 1000)}, ${userId}, ${sub.keys.p256dh.slice(0, 200)}, ${sub.keys.auth.slice(0, 100)})
+		on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`;
+}
+
+export async function removeSubscription(userId: number, endpoint: string) {
+	await sql`delete from push_subscriptions where endpoint = ${endpoint} and user_id = ${userId}`;
+}
+
+/** "Your turn" — only if that person isn't looking at the table right now (seen in the last 25 s). */
+export async function alertTurn(gameId: number): Promise<void> {
+	const [t] = await sql<{ user_id: number }[]>`
+		select g.turn_user_id as user_id from games g
+		join users u on u.id = g.turn_user_id
+		join game_players p on p.game_id = g.id and p.user_id = g.turn_user_id
+		where g.id = ${gameId} and g.status = 'playing' and not u.is_bot and p.left_at is null
+		  and p.last_seen < now() - interval '25 seconds'`.catch(() => [] as never[]);
+	if (t) await notifyUsers([t.user_id], { title: 'Your turn', body: `It’s your turn in game ${gameId}.`, url: `/game/${gameId}`, tag: `turn-${gameId}` });
+}
+
+/** "Game started" — to everyone at the table who isn't watching the waiting room. */
+export async function alertStarted(gameId: number, hostId: number, hostName: string): Promise<void> {
+	const rows = await sql<{ user_id: number }[]>`
+		select p.user_id from game_players p join users u on u.id = p.user_id
+		where p.game_id = ${gameId} and not u.is_bot and p.user_id <> ${hostId} and p.last_seen < now() - interval '25 seconds'`.catch(() => [] as never[]);
+	if (rows.length) await notifyUsers(rows.map(r => r.user_id), { title: 'Game started', body: `${hostName} started game ${gameId}. Your cards are dealt.`, url: `/game/${gameId}`, tag: `turn-${gameId}` });
+}

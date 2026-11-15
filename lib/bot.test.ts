@@ -122,3 +122,32 @@ describe('no endless rounds', () => {
 		}
 	});
 });
+
+describe('Twist rules', () => {
+	const TWIST: Record<string, Condition[]> = {
+		'1': [{ type: 'set', count: 3 }, { type: 'set', count: 3 }, { type: 'set', count: 3 }],
+		'2': [{ type: 'set', count: 2 }, { type: 'set', count: 2 }, { type: 'set', count: 2 }, { type: 'set', count: 2 }],
+		'3': [{ type: 'set', count: 5 }, { type: 'run', count: 4 }],
+		'4': [{ type: 'set', count: 3 }, { type: 'set', count: 3 }, { type: 'run', count: 3 }],
+		'5': [{ type: 'set', count: 3 }, { type: 'run', count: 6 }],
+		'6': [{ type: 'run', count: 4 }, { type: 'run', count: 4 }],
+		'7': [{ type: 'run', count: 4 }, { type: 'color', count: 4 }],
+		'8': [{ type: 'runcolor', count: 5 }],
+		'9': [{ type: 'color', count: 8 }],
+		'10': [{ type: 'color', count: 9 }],
+	};
+	for (const n of [2, 4, 6]) {
+		it(`${n} Virtual Friends finish a Twist game with every card accounted for`, { timeout: 120000 }, () => {
+			const s = newGame(2, Array.from({ length: n }, (_, i) => i + 1), TWIST);
+			let turns = 0;
+			while (!s.finished && turns < 40000) { botTurn(s, s.turn!); expect(countCards(s)).toBe(108); turns++; }
+			expect(s.finished, `stuck in round ${s.round}`).not.toBeNull();
+			console.log(`twist ${n}: ${s.round} rounds, ${turns} turns`);
+		});
+	}
+	it('a colour run of 5 is planned with a wild', () => {
+		const plan = planPhase(['1r3', '1r4', '1r6', '1ww', '2r7', '1b5'], TWIST['8']);
+		expect(plan).not.toBeNull();
+		expect(meetsCondition(TWIST['8'][0], plan![0])).toBe(true);
+	});
+});

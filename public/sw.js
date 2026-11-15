@@ -4,7 +4,7 @@
  * - Navigations fall back to /offline.html when the network is down.
  * Bump VERSION when the precached files change.
  */
-const VERSION = 'rummy10-v3.5.0';
+const VERSION = 'rummy10-v3.6.0';
 const STATIC_CACHE = VERSION + '-static';
 
 const CARDS = [];
@@ -47,4 +47,36 @@ self.addEventListener('fetch', event => {
 			)
 		);
 	}
+});
+
+// ---------- Phone alerts (Web Push) ----------
+self.addEventListener('push', event => {
+	let d = {};
+	try { d = event.data ? event.data.json() : {}; } catch (e) { d = { title: 'Rummy10', body: event.data ? event.data.text() : '' }; }
+	const title = d.title || 'Rummy10';
+	event.waitUntil(self.registration.showNotification(title, {
+		body: d.body || '',
+		icon: '/icons/icon-192.png',
+		badge: '/icons/icon-192.png',
+		tag: d.tag || undefined,
+		renotify: !!d.tag,
+		vibrate: [90, 60, 90],
+		data: { url: d.url || '/' },
+	}));
+});
+
+self.addEventListener('notificationclick', event => {
+	event.notification.close();
+	const url = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href;
+	event.waitUntil((async () => {
+		const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+		for (const w of wins) {
+			if (new URL(w.url).origin === self.location.origin) {
+				await w.focus();
+				if ('navigate' in w) { try { await w.navigate(url); } catch (e) { /* cross-scope */ } }
+				return;
+			}
+		}
+		await self.clients.openWindow(url);
+	})());
 });

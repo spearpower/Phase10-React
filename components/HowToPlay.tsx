@@ -1,18 +1,11 @@
-// How to play Rummy10 (Classic rules). Used on /how-to-play and inside the table menu during a game.
-const PHASES = [
-	'2 sets of 3',
-	'1 set of 3 + 1 run of 4',
-	'1 set of 4 + 1 run of 4',
-	'1 run of 7',
-	'1 run of 8',
-	'1 run of 9',
-	'2 sets of 4',
-	'7 cards of one colour',
-	'1 set of 5 + 1 set of 2',
-	'1 set of 5 + 1 set of 3',
-];
+'use client';
+// How to play Rummy10 (Classic and Twist). Used on /how-to-play and inside the table menu during a game.
+import { useState } from 'react';
+import { RULESETS } from '@/lib/rulesets';
 
-export default function HowToPlay() {
+export default function HowToPlay({ edition }: { edition?: number }) {
+	const [shown, setShown] = useState(edition === 2 ? 2 : 1);
+	const rs = RULESETS.find(r => r.id === shown)!;
 	return (
 		<div className="howto">
 			<p>Be the first to get through all <b>10 phases</b>. Each round everyone is dealt 10 cards and works on their own phase.</p>
@@ -27,8 +20,12 @@ export default function HowToPlay() {
 			<p>Stuck? Tap <b>💡 Hint</b> on your turn. It shows which cards to keep, which to throw, and can arrange a complete phase for you.</p>
 
 			<h3>The 10 phases</h3>
-			<ol className="phases">{PHASES.map((p, i) => <li key={i}><span className="pn">{i + 1}</span>{p}</li>)}</ol>
-			<p className="small"><b>Set</b> = cards of the same number (Red 7, Blue 7, Green 7). <b>Run</b> = numbers in order, any colours (3‑4‑5‑6).</p>
+			<div className="segmented" role="radiogroup" aria-label="Rule set" style={{ marginBottom: 10 }}>
+				{RULESETS.map(r => <label key={r.id}><input type="radio" name="howto-rules" checked={shown === r.id} onChange={() => setShown(r.id)} /><span>{r.name}{edition !== undefined && r.id === edition ? ' · this game' : ''}</span></label>)}
+			</div>
+			<p className="small" style={{ marginTop: 0 }}>{rs.blurb}</p>
+			<ol className="phases">{rs.phases.map((p, i) => <li key={i}><span className="pn">{i + 1}</span>{p}</li>)}</ol>
+			<p className="small"><b>Set</b> = cards of the same number (Red 7, Blue 7, Green 7). <b>Run</b> = numbers in order, any colours (3‑4‑5‑6). <b>Colour run</b> = numbers in order, all one colour.</p>
 
 			<h3>Special cards</h3>
 			<ul>

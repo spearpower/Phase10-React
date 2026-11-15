@@ -3,9 +3,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, avatar } from '@/lib/client';
 import { Chevron, ErrorBanner, NavBar, Skeleton, TabBar } from '@/components/ui';
 
-interface Row { id: number; username: string; photo: string; points: number; games: number }
+interface Row { id: number; username: string; photo: string; points: number; games: number; titles: number }
+interface Champion { month: string; userId: number; username: string; photo: string; points: number; games: number }
+const monthName = (m: string) => new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(m + '-15T00:00:00Z'));
 interface Stats {
 	user: { id: number; username: string; photo: string };
+	titles: number;
 	games: number; wins: number; winRate: number; avgPlace: number | null; bestStreak: number; streak: number; points: number;
 	practiceGames: number; practiceWins: number;
 	headToHead: { id: number; username: string; photo: string; games: number; wins: number; losses: number }[];
@@ -57,10 +60,11 @@ export default function ScoresPage() {
 
 function Leaderboard({ onPick }: { onPick: (id: number) => void }) {
 	const [rows, setRows] = useState<Row[] | null>(null);
+	const [fame, setFame] = useState<Champion[]>([]);
 	const [error, setError] = useState('');
 	const month = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'Africa/Kampala' }).format(new Date());
 	useEffect(() => {
-		const load = () => api<{ rows: Row[] }>('/api/scores').then(d => setRows(d.rows)).catch(e => setError(e.message));
+		const load = () => api<{ rows: Row[]; hallOfFame: Champion[] }>('/api/scores').then(d => { setRows(d.rows); setFame(d.hallOfFame || []); }).catch(e => setError(e.message));
 		load();
 		const t = setInterval(load, 60000);
 		return () => clearInterval(t);
@@ -76,13 +80,28 @@ function Leaderboard({ onPick }: { onPick: (id: number) => void }) {
 						<button key={r.id} type="button" className="list-row" onClick={() => onPick(r.id)} aria-label={`${r.username}, ${r.points} points. Show stats`}>
 							<span className="rank">{i + 1}</span>
 							<img className="av" src={avatar(r.photo)} alt="" />
-							<span className="main"><span className="title">{r.username}</span><span className="sub">{r.games} {r.games === 1 ? 'game' : 'games'}</span></span>
+							<span className="main"><span className="title">{r.username}{r.titles > 0 && <span className="champ" title={`${r.titles}× monthly champion`}> 👑{r.titles > 1 ? `×${r.titles}` : ''}</span>}</span><span className="sub">{r.games} {r.games === 1 ? 'game' : 'games'}</span></span>
 							<span className="meta"><b>{r.points}</b> pts</span>
 						</button>
 					))}
 				</div>
 			)}
 			<ErrorBanner>{error}</ErrorBanner>
+			<div className="section-title">Hall of Fame</div>
+			{fame.length === 0 ? (
+				<div className="empty"><strong>No champions yet</strong>The player with the most points at the end of each month is crowned here.</div>
+			) : (
+				<div className="list fame">
+					{fame.map(c => (
+						<button key={c.month} type="button" className="list-row" onClick={() => onPick(c.userId)} aria-label={`${monthName(c.month)} champion ${c.username}. Show stats`}>
+							<span className="fame-crown" aria-hidden="true">👑</span>
+							<img className="av" src={avatar(c.photo)} alt="" />
+							<span className="main"><span className="title">{c.username}</span><span className="sub">{monthName(c.month)} champion</span></span>
+							<span className="meta"><b>{c.points}</b> pts<br /><span className="sub">{c.games} {c.games === 1 ? 'game' : 'games'}</span></span>
+						</button>
+					))}
+				</div>
+			)}
 		</>
 	);
 }
@@ -101,7 +120,7 @@ function StatsView({ userId }: { userId?: number }) {
 		<>
 			<div className="stats-head">
 				<img className="avatar" src={avatar(s.user.photo)} alt="" />
-				<div><div className="name">{s.user.username}</div><div className="sub">{s.points} leaderboard points all time</div></div>
+				<div><div className="name">{s.user.username}{s.titles > 0 && <span className="champ"> 👑</span>}</div><div className="sub">{s.titles > 0 ? `${s.titles}× monthly champion · ` : ''}{s.points} leaderboard points all time</div></div>
 			</div>
 			{s.games === 0 && s.practiceGames === 0 ? (
 				<div className="empty"><strong>No finished games yet</strong>Stats appear after the first game is played to the end.</div>

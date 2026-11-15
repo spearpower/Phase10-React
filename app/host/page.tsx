@@ -3,10 +3,12 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/client';
 import { ErrorBanner, NavBar } from '@/components/ui';
+import { RULESETS } from '@/lib/rulesets';
 
 export default function HostPage() {
 	const router = useRouter();
 	const [pin, setPin] = useState('');
+	const [edition, setEdition] = useState<1 | 2>(1);
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
 
@@ -15,7 +17,7 @@ export default function HostPage() {
 		if (pin && !/^\d{4}$/.test(pin)) { setError('The PIN must be 4 digits, or leave it empty.'); return; }
 		setBusy(true); setError('');
 		try {
-			const { id } = await api<{ id: number }>('/api/games', { pin, timer: 40 });
+			const { id } = await api<{ id: number }>('/api/games', { pin, timer: 40, edition });
 			router.replace(`/lobby/${id}`);
 		} catch (err) { setError((err as Error).message); setBusy(false); }
 	}
@@ -36,7 +38,10 @@ export default function HostPage() {
 					</div>
 					<p className="hint">Add a 4-digit PIN to make the game private.</p>
 					<div className="section-title">Rules</div>
-					<div className="fields"><div className="field"><label>Rule set</label><div style={{ minHeight: 32, padding: '4px 0' }}>Classic — 10 phases</div></div></div>
+					<div className="segmented" role="radiogroup" aria-label="Rule set">
+						{RULESETS.map(r => <label key={r.id}><input type="radio" name="edition" checked={edition === r.id} onChange={() => setEdition(r.id)} /><span>{r.name}</span></label>)}
+					</div>
+					<p className="hint">{RULESETS.find(r => r.id === edition)!.blurb} <a href="/how-to-play" style={{ color: 'var(--gold)' }}>See the phases</a></p>
 					<div className="dock"><div>
 						<button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create Game'}</button>
 						<ErrorBanner>{error}</ErrorBanner>

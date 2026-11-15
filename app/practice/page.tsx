@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/client';
 import { ErrorBanner, NavBar } from '@/components/ui';
 import { LEVELS } from '@/lib/levels';
+import { RULESETS } from '@/lib/rulesets';
 
 const TIMERS = [0, 20, 40, 60];
 
@@ -12,13 +13,14 @@ export default function PracticePage() {
 	const [friends, setFriends] = useState(3);
 	const [timer, setTimer] = useState(0);
 	const [level, setLevel] = useState<'easy' | 'normal' | 'smart'>('normal');
+	const [edition, setEdition] = useState<1 | 2>(1);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
 
 	async function start() {
 		setBusy(true); setError('');
 		try {
-			const { id } = await api<{ id: number }>('/api/games/practice', { friends, timer, level });
+			const { id } = await api<{ id: number }>('/api/games/practice', { friends, timer, level, edition });
 			router.replace(`/game/${id}`);
 		} catch (e) { setError((e as Error).message); setBusy(false); }
 	}
@@ -37,6 +39,12 @@ export default function PracticePage() {
 					))}
 				</div>
 				<p className="hint">{friends + 1} players at the table, including you.</p>
+
+				<div className="section-title">Rules</div>
+				<div className="segmented" role="radiogroup" aria-label="Rule set">
+					{RULESETS.map(r => <label key={r.id}><input type="radio" name="edition" checked={edition === r.id} onChange={() => setEdition(r.id)} /><span>{r.name}</span></label>)}
+				</div>
+				<p className="hint">{RULESETS.find(r => r.id === edition)!.blurb}</p>
 
 				<div className="section-title">How well they play</div>
 				<div className="segmented" role="radiogroup" aria-label="How well Virtual Friends play">

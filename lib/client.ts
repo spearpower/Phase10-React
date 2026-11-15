@@ -14,6 +14,9 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 		cache: 'no-store',
 	});
 	const data = await res.json().catch(() => ({}));
+	if (res.status === 428 && typeof window !== 'undefined' && location.pathname !== '/new-password') {
+		window.location.href = '/new-password';
+	}
 	if (res.status === 401 && typeof window !== 'undefined') {
 		window.location.href = '/signin?next=' + encodeURIComponent(location.pathname);
 	}
@@ -23,9 +26,9 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 
 export interface LobbyPlayer { id: number; seat: number; username: string; photo: string; online: boolean; isBot?: boolean; left?: boolean }
 export interface GameData {
-	id: number; me: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned' | 'ended'; hostId: number; isMember: boolean;
+	id: number; me: number; edition?: number; status: 'lobby' | 'playing' | 'finished' | 'abandoned' | 'ended'; hostId: number; isMember: boolean;
 	pin: string | null; private: boolean; timerSec: number; version: number; deadline: string | null;
-	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; practice?: boolean; chatLast?: number;
+	serverNow: string; nextGameId: number | null; players: LobbyPlayer[]; view: GameView | null; watch?: GameView | null; practice?: boolean; chatLast?: number;
 	canManage?: boolean; superAdmin?: boolean;
 	myLeft?: { by: number | null; byName?: string | null; reason: string | null } | null;
 	ended?: { by: number | null; byName?: string | null; reason: string } | null;

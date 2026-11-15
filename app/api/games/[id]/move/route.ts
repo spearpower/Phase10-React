@@ -2,6 +2,7 @@ import { after } from 'next/server';
 import { body, fail, json, withUser } from '@/lib/http';
 import { move } from '@/lib/games';
 import { notifyGame } from '@/lib/realtime';
+import { alertTurn } from '@/lib/push';
 import { Action } from '@/lib/engine';
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -31,6 +32,10 @@ export const POST = withUser(async (user, req: Request, ctx: Ctx) => {
 	if (!action) return fail('That move isn’t valid');
 	const r = await move(user, Number(id), action);
 	// Tell the other players after we've answered: the mover never waits for the broadcast
-	if (r.changed) after(() => notifyGame(Number(id), r.version));
+	if (r.changed) after(async () => {
+		await notifyGame(Number(id), r.version);
+		// the turn may have passed to someone who isn't looking: buzz their phone
+		if (action.type === 'discard' || action.type === 'skip' || action.type === 'timeout') await alertTurn(Number(id));
+	});
 	return json(r);
 });

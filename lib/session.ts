@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify } from 'jose';
 export const COOKIE = 'sofi10_session';
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-export interface Session { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin' }
+export interface Session { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin'; mustChange?: boolean }
 
 function key() {
 	const secret = process.env.SESSION_SECRET;
@@ -16,7 +16,7 @@ function key() {
 }
 
 export async function signSession(s: Session): Promise<string> {
-	return new SignJWT({ u: s.username, p: s.photo, r: s.role })
+	return new SignJWT({ u: s.username, p: s.photo, r: s.role, ...(s.mustChange ? { mc: 1 } : {}) })
 		.setProtectedHeader({ alg: 'HS256' })
 		.setSubject(String(s.id))
 		.setIssuedAt()
@@ -28,7 +28,7 @@ export async function readSession(token: string | undefined): Promise<Session | 
 	if (!token) return null;
 	try {
 		const { payload } = await jwtVerify(token, key(), { algorithms: ['HS256'] });
-		return { id: Number(payload.sub), username: String(payload.u), photo: String(payload.p), role: payload.r === 'superadmin' ? 'superadmin' : payload.r === 'admin' ? 'admin' : 'player' };
+		return { id: Number(payload.sub), username: String(payload.u), photo: String(payload.p), role: payload.r === 'superadmin' ? 'superadmin' : payload.r === 'admin' ? 'admin' : 'player', mustChange: payload.mc === 1 };
 	} catch {
 		return null;
 	}

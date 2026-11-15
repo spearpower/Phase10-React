@@ -13,6 +13,19 @@ export async function middleware(req: NextRequest) {
 		url.search = pathname !== '/' ? `?next=${encodeURIComponent(pathname)}` : '';
 		return NextResponse.redirect(url);
 	}
+	// After an admin password reset: choose a new password before anything else
+	if (session?.mustChange && pathname !== '/new-password') {
+		const url = req.nextUrl.clone();
+		url.pathname = '/new-password';
+		url.search = '';
+		return NextResponse.redirect(url);
+	}
+	if (session && !session.mustChange && pathname === '/new-password') {
+		const url = req.nextUrl.clone();
+		url.pathname = '/';
+		url.search = '';
+		return NextResponse.redirect(url);
+	}
 	if (session && (pathname === '/signin' || pathname === '/signup')) {
 		const url = req.nextUrl.clone();
 		url.pathname = '/';

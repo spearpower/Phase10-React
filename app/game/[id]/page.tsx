@@ -9,6 +9,8 @@ import { initSound, playSound, playTurnSound, setSoundOn, soundOn } from '@/lib/
 import { Bubbles, Confetti, Crown, type Bubble, type BubbleKind } from '@/components/Celebrate';
 import TableChat from '@/components/TableChat';
 import TableMenu from '@/components/TableMenu';
+import WatchBoard from '@/components/WatchBoard';
+import VoiceChat from '@/components/VoiceChat';
 import { hintFor, type Hint } from '@/lib/plan';
 
 const REACTIONS = ['👏', '😂', '😮', '🔥', '👍', '😭'];
@@ -45,9 +47,11 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const reported = useRef<string | null>(null);
 	const wasMyTurn = useRef(false);
 	const [sound, setSound] = useState(true);
-	useEffect(() => { initSound(); setSound(soundOn()); }, []);
+	useEffect(() => { initSound(); setSound(soundOn()); try { localStorage.setItem('rummy10.playedOnce', '1'); } catch { /* ignore */ } }, []);
 	const [bubbles, setBubbles] = useState<Bubble[]>([]);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [voiceOn, setVoiceOn] = useState(false);
+	useEffect(() => { api<{ voiceChat: boolean }>('/api/settings').then(s => setVoiceOn(!!s.voiceChat)).catch(() => {}); }, []);
 	const [party, setParty] = useState<null | 'round' | 'win'>(null);
 	const bubbleSeq = useRef(0);
 	const prevView = useRef<GameView | null>(null);
@@ -136,6 +140,18 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	useEffect(() => { if (!party) return; const t = setTimeout(() => setParty(null), party === 'win' ? 4200 : 2400); return () => clearTimeout(t); }, [party]);
 
+	// fade the bottom of the opponents' area when there is more to scroll
+	const rivalsRef = useRef<HTMLElement>(null);
+	useEffect(() => {
+		const el = rivalsRef.current;
+		if (!el) return;
+		const mark = () => el.classList.toggle('more', el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+		mark();
+		el.addEventListener('scroll', mark, { passive: true });
+		window.addEventListener('resize', mark);
+		return () => { el.removeEventListener('scroll', mark); window.removeEventListener('resize', mark); };
+	});
+
 	// a hint is only good for the hand it was worked out for
 	const handKey = (view?.hand || []).join(',') + '|' + view?.turn + '|' + view?.step;
 	useEffect(() => { setTip(null); }, [handKey]);
@@ -163,7 +179,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
 	// turn timer (server clock), and report a timeout once when it hits zero
 	useEffect(() => {
-		if (!data?.deadline || data.status !== 'playing') { setLeft(null); return; }
+		if (!data?.deadline || data.status !== 'playing' || !data.isMember) { setLeft(null); return; }
 		const tick = () => {
 			const s = Math.max(0, Math.ceil((new Date(data.deadline!).getTime() - serverNow()) / 1000));
 			setLeft(s);
@@ -175,7 +191,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		tick();
 		const t = setInterval(tick, 250);
 		return () => clearInterval(t);
-	}, [data?.deadline, data?.status, id, accept, refresh, serverNow]);
+	}, [data?.deadline, data?.status, data?.isMember, id, accept, refresh, serverNow]);
 
 	const say = (msg: string) => { setToast(msg); haptic(8); setTimeout(() => setToast(t => (t === msg ? '' : t)), 2600); };
 	const react = (emoji: string) => {
@@ -218,18 +234,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			</main></div>
 		);
 	}
-	if (data && !view && data.canManage && data.status === 'playing') {
-		return (
-			<div className="app"><main>
-				<h1 className="large-title">Game {data.id}</h1>
-				<p className="subtitle">You’re not playing at this table. As a super admin you can remove players or end the game.</p>
-				<button className="btn btn-primary" type="button" onClick={() => setMenuOpen(true)}>Table Options</button>
-				<Link className="btn btn-plain" href="/">Back to Play</Link>
-				{menuOpen && <TableMenu gameId={id} me={me} canManage players={data.players} inGame={false} onClose={() => setMenuOpen(false)}
-					onDone={() => { setMenuOpen(false); refresh(); }} />}
-			</main></div>
-		);
-	}
+	if (data && !view && data.watch) return <WatchBoard data={data} onChanged={refresh} />;
 	if (!data || !view || !view.players.some(p => p.id === me)) {
 		return (
 			<div className="board" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
@@ -243,6 +248,16 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	const step = view.step;
 	const top = view.discard[0];
 	const rivals = rotate(view.order, me).filter(x => x !== me).map(x => view.players.find(p => p.id === x)!);
+	const rc = rivals.length <= 2 ? rivals.length : rivals.length <= 4 ? 2 : 3;
+	// Players who laid down get a wide box (groups side by side) while the table stays within 3 rows
+	const wide = new Set<number>();
+	if (rc >= 2) {
+		let cells = rivals.length;
+		for (const r of rivals) if (r.done && Math.ceil((cells + 1) / rc) <= 3) { wide.add(r.id); cells += 1; }
+	}
+	/** Both ends are legal for the selected card (only matters for runs): show ◀ ▶ choices. */
+	const bothEnds = (c: Condition, cards: string[]) => !!selected && (c.type === 'run' || c.type === 'runcolor') && cards.length > 0
+		&& !!placeInGroup(c.type, cards, selected, 'start') && !!placeInGroup(c.type, cards, selected, 'end');
 	const canPlay = myTurn && step === 'play';
 	const allMet = mine.conditions.every((c, i) => meetsCondition(c, mine.groups?.[i] || []));
 	const staged = !mine.done && (mine.groups || []).some(g => g.length);
@@ -290,19 +305,19 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 		}
 		say('Choose a player to skip first');
 	};
-	const tapMyGroup = (g: number) => {
+	const tapMyGroup = (g: number, at?: 'start' | 'end') => {
 		if (!selected) return say(mine.done ? 'Select a card to add' : 'Select a card from your hand first');
 		if (mine.done && !canPlay) return say('You can add to groups on your turn, after drawing');
-		const end = fitEnd(mine.conditions[g], mine.groups?.[g] || [], selected);
+		const end = at ?? fitEnd(mine.conditions[g], mine.groups?.[g] || [], selected);
 		if (!end) return say('That card doesn’t fit there');
 		fly(`[data-card="${selected}"]`, `[data-drop="g${g}"]`, cardSrc(selected));
 		send({ type: 'place', card: selected, group: g, end });
 	};
-	const tapRivalGroup = (r: PlayerView, g: number) => {
+	const tapRivalGroup = (r: PlayerView, g: number, at?: 'start' | 'end') => {
 		if (!selected) return say('Select a card to add');
 		if (!canPlay) return say('You can add cards on your turn, after drawing');
 		if (!mine.done) return say('Lay down your own phase first');
-		const end = fitEnd(r.conditions[g], r.groups?.[g] || [], selected);
+		const end = at ?? fitEnd(r.conditions[g], r.groups?.[g] || [], selected);
 		if (!end) return say('That card doesn’t fit there');
 		fly(`[data-card="${selected}"]`, `[data-drop="r${r.id}-${g}"]`, cardSrc(selected));
 		send({ type: 'hit', target: r.id, group: g, card: selected, end });
@@ -315,11 +330,11 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 	return (
 		<div className={`board${myTurn && !view.finished ? ' myturn' : ''}${myTurn && step === 'draw' ? ' mustdraw' : ''}`}>
 			{/* Rivals */}
-			<section className={`rivals${rivals.length >= 3 ? ' compact' : ''}`} style={{ ['--rc' as string]: rivals.length <= 3 ? rivals.length : rivals.length === 4 ? 2 : 3 }} aria-label="Other players">
+			<section ref={rivalsRef} className={`rivals${rivals.length >= 4 ? ' compact' : ''}`} style={{ ['--rc' as string]: rc }} aria-label="Other players">
 				{rivals.map(r => {
 					const target = myTurn && step === 'skip' && view.skipTargets.includes(r.id);
 					return (
-						<div key={r.id} data-seat={r.id} className={`rival${view.turn === r.id ? ' turn' : ''}${target ? ' target' : ''}`}
+						<div key={r.id} data-seat={r.id} className={`rival${view.turn === r.id ? ' turn' : ''}${target ? ' target' : ''}${wide.has(r.id) ? ' laid' : ''}`}
 							role={target ? 'button' : undefined} tabIndex={target ? 0 : undefined} aria-label={target ? `Skip ${nameOf(r.id)}` : undefined}
 							onClick={() => tapRival(r)} onKeyDown={e => { if (e.key === 'Enter') tapRival(r); }}>
 							{r.skipped && <span className="badge pill orange">Skipped next</span>}
@@ -335,19 +350,31 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 							</div>
 							{r.done && r.groups && (
 								<div className="rgroups">
-									{r.conditions.map((c, g) => (
-										<button key={g} type="button" data-drop={`r${r.id}-${g}`} className={`rgroup${selected && canPlay && mine.done ? ' can-drop' : ''}`}
-											onClick={e => { e.stopPropagation(); tapRivalGroup(r, g); }} aria-label={`${nameOf(r.id)}: ${conditionLabel(c)}`}>
-											<span className="lbl">{conditionLabel(c)}</span>
-											<Minis cards={r.groups?.[g] || []} />
-										</button>
-									))}
+									{r.conditions.map((c, g) => {
+										const cards = r.groups?.[g] || [];
+										const live = !!selected && canPlay && mine.done;
+										const two = live && bothEnds(c, cards);
+										return (
+											<div key={g} className={`rgroup${live ? ' can-drop' : ''}${two ? ' two-ends' : ''}`}>
+												<div className="rg-row">
+													{two && <button type="button" className="end-btn" onClick={e => { e.stopPropagation(); tapRivalGroup(r, g, 'start'); }} aria-label={`Add to the start of ${nameOf(r.id)}’s ${conditionLabel(c)}`}>◀</button>}
+													<button type="button" className="rg-cards" data-drop={`r${r.id}-${g}`} onClick={e => { e.stopPropagation(); tapRivalGroup(r, g); }}
+														aria-label={`${nameOf(r.id)}: ${conditionLabel(c)}: ${cards.map(label).join(', ')}`}>
+														<Minis cards={cards} />
+													</button>
+													{two && <button type="button" className="end-btn" onClick={e => { e.stopPropagation(); tapRivalGroup(r, g, 'end'); }} aria-label={`Add to the end of ${nameOf(r.id)}’s ${conditionLabel(c)}`}>▶</button>}
+												</div>
+												<span className="lbl">{conditionLabel(c)}</span>
+											</div>
+										);
+									})}
 								</div>
 							)}
 							{!r.done && <span className="st" style={{ fontSize: 12, color: 'var(--label-3)' }}>{r.conditions.map(conditionLabel).join(' + ')}</span>}
 						</div>
 					);
 				})}
+				<button type="button" className="more-rivals" onClick={() => rivalsRef.current?.scrollBy({ top: rivalsRef.current.clientHeight * 0.8, behavior: 'smooth' })} aria-label="Show more players">More players ▾</button>
 			</section>
 
 			{/* Piles + hint */}
@@ -384,9 +411,13 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 						return (
 							<div key={g} className={`mgroup${mine.done ? ' done' : ''}${selected && (!mine.done || canPlay) ? ' can-drop' : ''}`}>
 								<span className="lbl">{conditionLabel(c)} {ok && !mine.done ? '✓' : ''}</span>
-								<button type="button" className="cards" data-drop={`g${g}`} onClick={() => tapMyGroup(g)} aria-label={`${conditionLabel(c)}: ${cards.length ? cards.map(label).join(', ') : 'empty'}`}>
-									{cards.length ? <Minis cards={cards} /> : <span className="empty-msg">{selected ? 'Tap to place' : 'Empty'}</span>}
-								</button>
+								<div className="mg-row">
+									{(!mine.done || canPlay) && bothEnds(c, cards) && <button type="button" className="end-btn" onClick={() => tapMyGroup(g, 'start')} aria-label={`Add to the start of your ${conditionLabel(c)}`}>◀</button>}
+									<button type="button" className="cards" data-drop={`g${g}`} onClick={() => tapMyGroup(g)} aria-label={`${conditionLabel(c)}: ${cards.length ? cards.map(label).join(', ') : 'empty'}`}>
+										{cards.length ? <Minis cards={cards} /> : <span className="empty-msg">{selected ? 'Tap to place' : 'Empty'}</span>}
+									</button>
+									{(!mine.done || canPlay) && bothEnds(c, cards) && <button type="button" className="end-btn" onClick={() => tapMyGroup(g, 'end')} aria-label={`Add to the end of your ${conditionLabel(c)}`}>▶</button>}
+								</div>
 							</div>
 						);
 					})}
@@ -441,6 +472,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 				</button>
 			</footer>
 
+			<VoiceChat gameId={id} enabled={voiceOn && data.status === 'playing'} />
 			<TableChat gameId={id} me={me} people={names} chatLast={data.chatLast || 0} onEmoji={floatEmoji} />
 			{tip && (
 				<div className="hint-card" role="status">
@@ -465,7 +497,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 			{view.finished && <FinishedSheet data={data} view={view} nameOf={nameOf} />}
 			{data.status === 'ended' && !view.finished && <EndedSheet data={data} nameOf={nameOf} />}
 			{menuOpen && (
-				<TableMenu gameId={id} me={me} canManage={!!data.canManage} players={data.players.filter(p => view.order.includes(p.id))} inGame
+				<TableMenu edition={data.edition} gameId={id} me={me} canManage={!!data.canManage} players={data.players.filter(p => view.order.includes(p.id))} inGame
 					onClose={() => setMenuOpen(false)}
 					onDone={what => { setMenuOpen(false); if (what === 'left') router.replace('/'); else refresh(); }} />
 			)}

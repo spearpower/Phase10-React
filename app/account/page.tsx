@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import AlertsSwitch from '@/components/AlertsSwitch';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import { AVATARS, avatarUrl } from '@/lib/avatars';
@@ -96,6 +97,9 @@ export default function AccountPage() {
 					<ErrorBanner>{error}</ErrorBanner>
 				</form>
 
+				<div className="section-title">Alerts</div>
+				<AlertsSwitch />
+
 				<div className="section-title">Sound</div>
 				<div className="switch-row" style={{ marginTop: 0 }}>
 					<label htmlFor="snd">Chime when it’s my turn</label>
@@ -134,7 +138,7 @@ export default function AccountPage() {
 						<nav className="group">
 							<Link className="row-link" href="/admin">
 								<span className="row-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V6l-8-3Z" /></svg></span>
-								<span className="row-text"><span className="row-title">Game Settings</span><span className="row-sub">Virtual Friends, live tables, stuck games</span></span>
+								<span className="row-text"><span className="row-title">Admin</span><span className="row-sub">Tables, players, Virtual Friends, voice chat</span></span>
 								<Chevron />
 							</Link>
 						</nav>

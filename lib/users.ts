@@ -4,19 +4,19 @@ import { GameError } from './engine';
 import { Session } from './session';
 import { AVATARS, isAvatar } from './avatars';
 
-interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin'; status: string; ok: boolean; is_bot?: boolean }
+interface UserRow { id: number; username: string; photo: string; role: 'player' | 'admin' | 'superadmin'; status: string; ok: boolean; is_bot?: boolean; must_change_password?: boolean }
 
 export async function signIn(username: string, password: string): Promise<Session> {
 	const u = (username || '').trim();
 	if (!u || !password) throw new GameError('Enter your username and password');
 	const [row] = await sql<UserRow[]>`
-		select id, username, photo, role, status, is_bot, app_check_password(${password}, password_hash) as ok
+		select id, username, photo, role, status, is_bot, must_change_password, app_check_password(${password}, password_hash) as ok
 		from users where lower(username) = lower(${u})`;
 	// Same message for unknown user and wrong password, so usernames can't be probed
 	if (!row || !row.ok || row.is_bot) throw new GameError('That username and password don’t match', 401);
 	if (row.status !== 'active') throw new GameError('This account is suspended. Contact the admin.', 403);
-	await sql`update users set last_login_at = now() where id = ${row.id}`;
-	return { id: row.id, username: row.username, photo: row.photo, role: row.role };
+	await sql`update users set last_login_at = now(), last_seen_at = now() where id = ${row.id}`;
+	return { id: row.id, username: row.username, photo: row.photo, role: row.role, mustChange: !!row.must_change_password };
 }
 
 export interface SignUpInput { fullname: string; email: string; phone: string; username: string; password: string; repassword: string }
@@ -87,5 +87,17 @@ export async function changePassword(id: number, current: string, next: string, 
 	if (next !== repeat) throw new GameError('The two new passwords don’t match');
 	const [row] = await sql<{ ok: boolean }[]>`select app_check_password(${current}, password_hash) as ok from users where id = ${id} and not is_bot`;
 	if (!row?.ok) throw new GameError('Your current password isn’t right', 403);
-	await sql`update users set password_hash = app_hash_password(${next}) where id = ${id}`;
+	await sql`update users set password_hash = app_hash_password(${next}), must_change_password = false where id = ${id}`;
+}
+
+/** After an admin reset: the player sets a new password (no current password needed, only while flagged). */
+export async function setNewPassword(id: number, next: string, repeat: string): Promise<Session> {
+	if (next.length < 6) throw new GameError('Use a new password of at least 6 characters');
+	if (next !== repeat) throw new GameError('The two passwords don’t match');
+	const [row] = await sql<{ id: number; username: string; photo: string; role: Session['role'] }[]>`
+		update users set password_hash = app_hash_password(${next}), must_change_password = false
+		where id = ${id} and must_change_password and not is_bot
+		returning id, username, photo, role`;
+	if (!row) throw new GameError('Your password was already changed. Sign in again.', 409);
+	return { id: row.id, username: row.username, photo: row.photo, role: row.role };
 }
